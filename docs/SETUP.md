@@ -43,7 +43,7 @@ This runs, in order:
    TLS).
 3. `05-enable-mdns.sh` — turns on `avahi-daemon` (installed but inactive
    by default on this image) so the Pi is reachable at
-   `kali-raspberry-pi-zero-w-pitail.local` instead of needing to look up
+   `pitail.local` instead of needing to look up
    its current IP every time. Matters most for
    [phone-only operation](#5-phone-only-operation-as-pi-tail-intends).
 4. `03-install-rtl8812au-driver.sh` — builds and installs the Alfa's
@@ -127,7 +127,7 @@ day:
    - **ConnectBot** — simpler GUI-only SSH client.
 3. Connect by hostname, no IP lookup needed:
    ```
-   ssh kali@kali-raspberry-pi-zero-w-pitail.local
+   ssh kali@pitail.local
    ```
    password `kali`. If `.local` resolution doesn't work in your chosen
    app (mDNS support varies by Android app), fall back to checking

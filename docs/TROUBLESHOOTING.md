@@ -316,7 +316,22 @@ where you're looking.
 
 ---
 
-### 12. Speeding up the DKMS compile
+### 12. Default hostname is too long to type on a phone
+
+**Symptom:** `kali-raspberry-pi-zero-w-pitail.local` works for mDNS
+resolution, but is painful to type on a phone keyboard for phone-only
+operation (the whole point of pi-tail).
+
+**Fix:** renamed to `pitail` (`hostnamectl set-hostname pitail`, plus
+updating `/etc/hosts` to match, then restarting `avahi-daemon` so it
+advertises the new name). Now reachable at `pitail.local`. Automated in
+`scripts/setup/05-enable-mdns.sh`, which sets this short hostname on a
+fresh setup rather than requiring a manual rename after the fact like we
+did here.
+
+---
+
+### 13. Speeding up the DKMS compile
 
 **Question worth pre-empting:** can background services (bluetooth, cron,
 ModemManager, etc.) be stopped to speed up the build?

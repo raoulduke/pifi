@@ -14,7 +14,7 @@ carries an Alfa AWUS036ACH external wireless adapter. The onboard wifi
 
 **Intended to run entirely from the phone that hosts the hotspot** — no
 laptop required day to day. SSH in from a phone SSH client
-(Termux/ConnectBot) at `kali-raspberry-pi-zero-w-pitail.local`; the laptop
+(Termux/ConnectBot) at `pitail.local`; the laptop
 is only for the one-time build/setup in this repo. See
 [docs/SETUP.md](docs/SETUP.md#5-phone-only-operation-as-pi-tail-intends).
 

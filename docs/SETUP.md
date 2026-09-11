@@ -33,7 +33,11 @@ sudo ./install.sh
 
 This runs, in order:
 1. `01-fix-network-routing.sh` — removes the stale `usb0` default route
-   that otherwise breaks internet access on every boot.
+   that otherwise breaks internet access on every boot. Fixes
+   `/boot/firmware/interfaces` (the actual persistent source on this
+   image — **not** `/etc/network/interfaces`, which gets silently
+   overwritten from the boot partition on every boot; see
+   [TROUBLESHOOTING.md #6](TROUBLESHOOTING.md)) and syncs it live.
 2. `02-fix-clock.sh` — forces an NTP resync (the Pi Zero W has no RTC and
    can drift wildly without internet access to correct it, which breaks
    TLS).
@@ -41,6 +45,23 @@ This runs, in order:
    driver via DKMS. **Budget 2-4 hours** for this on a Pi Zero W's single
    core. It runs detached, so you can disconnect and check back later —
    see the script's own output for how to check progress.
+
+Once the driver build finishes (`sudo dkms status` shows `installed`) **and
+the Alfa is physically connected** (step 3, below — do that first if you
+haven't), run the remaining step separately. `install.sh` doesn't wait
+around for the multi-hour build or for you to plug in hardware, so this
+has to be a manual follow-up:
+```
+sudo scripts/setup/04-pin-interface-names.sh
+sudo reboot
+```
+4. `04-pin-interface-names.sh` — pins `wlan0`/`wlan1` to fixed names by MAC
+   address. Without this, which physical adapter ends up named `wlan0` vs
+   `wlan1` is a boot-time race that can silently disconnect the intended
+   control-plane interface — see
+   [TROUBLESHOOTING.md #11](TROUBLESHOOTING.md). **Reboot after running
+   this** to confirm it actually took effect; don't just trust that it
+   silently worked.
 
 ## 3. Assemble the USB hardware chain
 
@@ -74,6 +95,16 @@ iw dev wlan1 info          # confirms "type monitor"
 If `wlan1` doesn't appear at all after the driver install finishes, reboot
 once — the USB modalias-based auto-load sometimes needs a fresh device
 enumeration to trigger.
+
+**Double-check which physical adapter got which name** — don't just check
+that `wlan0` and `wlan1` both exist, check that `wlan0`'s MAC is the
+onboard chip's and it's actually associated to your hotspot:
+```
+iw dev wlan0 info    # should show "ssid <your hotspot>", not the Alfa's MAC
+```
+If this doesn't match, `04-pin-interface-names.sh` either wasn't run or
+didn't take effect yet (needs a reboot after running) — see
+[TROUBLESHOOTING.md #11](TROUBLESHOOTING.md).
 
 ## 5. Day to day
 

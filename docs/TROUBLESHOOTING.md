@@ -12,14 +12,23 @@ applied (which `scripts/setup/install.sh` does automatically).
 **Symptom:** SSH to the Pi's IP is reachable, but `root`/`toor` is rejected
 from every client tried.
 
-**Root cause:** Not a typo/credential issue — `root`/`toor` simply isn't the
-credential on this image. Kali dropped root-by-default in 2020.1; current
-Kali images (including pi-tail) ship a non-root `kali` user, password
-`kali`, with root SSH login disabled. Per the official pi-tail docs, the
-actual defaults are SSH `kali`/`kali`, VNC `toortoor`.
+**Root cause:** `root`/`toor` isn't the actual credential on this image —
+**and this isn't a case of outdated user knowledge.** The image's own
+bundled `/boot/firmware/Pi-Tail.HOWTO` explicitly lists `root`/`toor` as
+the SSH default. That's simply wrong for this build: Kali dropped
+root-by-default in 2020.1, and current Kali images (including this
+pi-tail build) ship a non-root `kali` user, password `kali`, with root SSH
+login disabled — the pi-tail-specific HOWTO text just never got updated to
+reflect that org-wide Kali change. The on-device documentation and the
+actual image behavior disagree with each other.
 
-**Fix:** Use `kali`/`kali` over SSH. `kali` is in the `sudo` group, so `sudo
--i` gets you root from there.
+**Fix:** Use `kali`/`kali` over SSH (verified working). `kali` is in the
+`sudo` group, so `sudo -i` gets you root from there. VNC default is
+reportedly `toortoor` per the same HOWTO — not independently verified in
+this setup.
+
+**Takeaway:** don't fully trust this image's bundled docs for credentials —
+verify empirically.
 
 ---
 
@@ -32,11 +41,18 @@ actual defaults are SSH `kali`/`kali`, VNC `toortoor`.
 `/etc/wpa_supplicant/wpa_supplicant.conf`) hardcoded to a static IP that
 didn't match the actual hotspot's DHCP range.
 
-**Fix:** Changed both to `inet dhcp`. Note: pi-tail's *documented* default
-(`192.168.43.254`, static, via the `usb0` USB-tether interface — see #7) is
-also a fixed address, by design, for the direct-USB-tether path. The
-mismatch here was using a WiFi hotspot (which hands out an unpredictable
-DHCP range) with a profile that assumed a fixed address instead.
+**Fix:** Changed both to `inet dhcp` — **but see #6**, changing
+`/etc/network/interfaces` directly doesn't stick; the real fix has to be
+made to `/boot/firmware/interfaces`.
+
+**Context on the static-IP default:** pi-tail's own HOWTO documents a fixed
+default IP of `192.168.43.254` for WiFi tethering. `192.168.43.0/24` happens
+to be the conventional default subnet many Android phones use for their own
+hotspot, so a fixed client address made sense as a default assuming a
+"typical" Android hotspot. Our actual hotspot (a Pixel 3) was observed
+handing out a different, and *inconsistent* range across sessions
+(`192.168.108.x`, `.145.x`, `.3.x`) — see #3. So the fixed-IP default wasn't
+arbitrary, it just didn't match this particular phone's behavior.
 
 ---
 
@@ -105,22 +121,53 @@ two (see #6, #9).
 **Root cause:** `/etc/network/interfaces` ships a `usb0` stanza (Android
 USB-tethering default — this is pi-tail's **primary documented feature**,
 not leftover cruft, see ARCHITECTURE.md) with a **static default route**
-(`gateway 192.168.42.129`). `usb0` has no live link in this build (the USB
-port is dedicated to the hub/Alfa in host mode), but ifupdown still installs
-its route as the default, shadowing the real, working route via `wlan0`.
-Same-subnet traffic doesn't need a gateway, so local SSH/pings work fine
-while all internet-bound traffic silently goes to a dead interface.
+(`gateway 192.168.42.129`). A `g_ether` kernel module is loaded at boot
+(via `modules-load=dwc2,g_ether` in `cmdline.txt`) specifically to create
+this `usb0` gadget interface, regardless of whether anything's plugged into
+the port in gadget mode — so it always exists as a software interface, even
+though it has no live physical link in this build (the port itself is
+dedicated to the hub/Alfa in host mode). ifupdown still installs its route
+as the default, shadowing the real, working route via `wlan0`. Same-subnet
+traffic doesn't need a gateway, so local SSH/pings work fine while all
+internet-bound traffic silently goes to a dead interface.
 
-**This is persistent, not a one-off** — it recurs on every boot because it
-comes from a config file, not runtime state, and it defeated us once
-already after a routing fix that was only applied live (`ip route`
-commands) rather than to the file.
+**This is persistent, not a one-off, and defeated us twice for two
+different reasons:**
 
-**Fix (permanent):** remove the `gateway 192.168.42.129` line from the
-`usb0` stanza in `/etc/network/interfaces` (kept the static address line, in
-case USB tethering is ever wanted alongside a different USB setup later —
-just without it wrongly claiming the default route). Automated in
+1. First, a routing fix applied only live (`ip route del`/`add` over SSH)
+   didn't survive a reboot, because it never touched any config file.
+2. Second, editing `/etc/network/interfaces` directly *looked* like a
+   permanent fix (it survived until the next reboot) but **wasn't** — it
+   silently reverted. The actual reason: **`/etc/network/interfaces` is not
+   the real source of truth on this image.** `pi-tail.service`
+   (`WantedBy=local-fs.target`, i.e. runs on every boot) unconditionally
+   does `cp -f /boot/firmware/interfaces /etc/network/`, overwriting
+   whatever's in `/etc/` with whatever's on the **boot partition** every
+   single time. The Pi-Tail HOWTO says this explicitly and we initially
+   missed it: *"Don't edit `/etc/network/interfaces` or
+   `/etc/wpa_supplicant.conf` — they are being overwritten at boot time.
+   Use their equivalent in `/boot/firmware/`."*
+   `/boot/firmware/` is the same FAT32 partition that shows up as a normal
+   drive letter on Windows/macOS — the same one referenced throughout this
+   project as the boot partition.
+
+**Fix (actually permanent):** remove the `gateway 192.168.42.129` line from
+the `usb0` stanza in **`/boot/firmware/interfaces`** (the boot-partition
+template — kept the static address line, in case USB tethering is ever
+wanted alongside a different setup later, just without it wrongly claiming
+the default route), then copy that corrected file over the live
+`/etc/network/interfaces` too so it takes effect immediately without a
+reboot. Verified across an actual reboot cycle to hold. Automated in
 `scripts/setup/01-fix-network-routing.sh`.
+
+**Secondary effect worth knowing about:** once the bad route is removed
+live (rather than by fixing the file and rebooting), `wlan0`'s own DHCP
+client may not automatically claim the "default route" role either — some
+DHCP client hook scripts skip installing a default route if one already
+exists at the time, and by then the interface has already missed its
+window. If `ip route show` comes back with no `default` line at all after
+manually deleting the bad one, force a fresh lease: `sudo dhclient -v
+wlan0`.
 
 ---
 
@@ -206,7 +253,70 @@ rather than keeping one long-lived SSH session open.
 
 ---
 
-### 11. Speeding up the DKMS compile
+### 11. `wlan0`/`wlan1` swap identities across reboots
+
+**Symptom:** After a reboot, the Pi becomes unreachable at its usual
+address and stays that way for several minutes — well past normal boot
+time. When it finally does respond, it turns out to be reachable at a
+*different* IP than expected, and `iw dev` shows something wrong: the
+interface named `wlan0` has the **Alfa's** MAC address, and `wlan1` has the
+**onboard chip's** MAC address — the reverse of normal. Checking the
+phone's own hotspot client list shows "2 devices connected" the whole
+time, which is misleading: one of those two is the Alfa masquerading as
+`wlan0`, not the actual intended control-plane interface.
+
+**Root cause:** Linux assigns `wlanN` names to wireless interfaces in
+**enumeration order**, not by any fixed hardware identity — and there's a
+race between when the onboard SDIO wifi chip's driver (`brcmfmac`) attaches
+versus when the Alfa's USB driver (`88XXau`) attaches during boot. Most
+boots, the onboard chip wins the race and becomes `wlan0` as expected. At
+least once, the Alfa won instead, becoming `wlan0`. Since
+`/etc/network/interfaces` has an explicit stanza only for `wlan0` (with
+`wpa-roam` pointed at the hotspot credentials) and nothing for `wlan1`, on
+that boot the **Alfa** auto-associated to the hotspot (because it was
+`wlan0` that boot), while the **actual onboard chip** — now named `wlan1` —
+sat down and unconfigured, with no route to it at all. We only regained
+access because the Alfa happened to be reachable at its own DHCP-assigned
+address as a side effect, not because the intended control-plane path
+worked.
+
+**Why this matters:** the entire design in ARCHITECTURE.md assumes `wlan0`
+is *always* the reliable, always-up control-plane link, independent of
+whatever `wlan1` (the Alfa) is doing. A naming race silently breaks that
+assumption on an unpredictable subset of boots.
+
+**Fix:** pin both interfaces to fixed names by MAC address via
+`systemd-networkd` `.link` files, so `wlan0` always means the onboard chip
+and `wlan1` always means the Alfa, regardless of which driver attaches
+first:
+
+```
+# /etc/systemd/network/70-wlan0-onboard.link
+[Match]
+MACAddress=<onboard chip MAC>
+[Link]
+Name=wlan0
+
+# /etc/systemd/network/71-wlan1-alfa.link
+[Match]
+MACAddress=<Alfa MAC>
+[Link]
+Name=wlan1
+```
+
+Automated (with MAC addresses detected dynamically, not hardcoded) in
+`scripts/setup/04-pin-interface-names.sh`. Verified across an actual
+reboot to hold correctly.
+
+**Diagnostic tip:** if a reboot is taking unusually long to become
+reachable at the expected address, don't assume a hang — sweep the whole
+subnet's ARP table for *both* known MAC prefixes before concluding it's
+down. A misnamed interface can leave the Pi fully reachable, just not
+where you're looking.
+
+---
+
+### 12. Speeding up the DKMS compile
 
 **Question worth pre-empting:** can background services (bluetooth, cron,
 ModemManager, etc.) be stopped to speed up the build?

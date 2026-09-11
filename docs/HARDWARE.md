@@ -43,6 +43,30 @@ Power-on order: hub's wall adapter first, then the Alfa, then the Pi (or if
 the Pi is already running, USB hotplug of the rest is fine — Linux handles it
 dynamically).
 
+## Defaults per the device's own docs (`/boot/firmware/Pi-Tail.HOWTO`)
+
+Not all of these were verified to actually work as documented — see
+[TROUBLESHOOTING.md #1](TROUBLESHOOTING.md) for a case where the on-device
+docs are simply wrong (SSH is `kali`/`kali`, not `root`/`toor` as the HOWTO
+claims). Recorded here for reference, verify empirically before relying on
+any of them:
+
+| Mode | Documented default credential/address |
+|---|---|
+| SSH | `root` / `toor` — **wrong for this image, actual is `kali`/`kali`** |
+| VNC | `toortoor` — not independently verified |
+| WiFi tethering (stock) | SSID `sepultura` / password `R4t4m4h4tt4`, Pi at `192.168.43.254` |
+| WiFi-AP mode | SSID `Pi-Tail` / password `StickyFing3rsKal1-P!`, Pi at `192.168.40.1` |
+| USB/Smartphone tethering | Pi at `192.168.42.254`, phone at `192.168.42.129` |
+| USB/PC tethering | Pi at `192.168.44.254`, PC at `192.168.44.1` |
+| Bluetooth tethering | Pi at `192.168.41.1` |
+
+**Golden rule, straight from the device's own HOWTO:** *"Don't edit
+`/etc/network/interfaces` or `/etc/wpa_supplicant.conf` — they are being
+overwritten at boot time. Use their equivalent in `/boot/firmware/`."*
+We violated this ourselves initially and lost time to it — see
+[TROUBLESHOOTING.md #6](TROUBLESHOOTING.md).
+
 ## Known pitfalls when sourcing replacement parts
 
 - **USB-C/USB-A adapters look identical in both orientations.** What matters

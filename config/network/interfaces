@@ -1,8 +1,18 @@
-# Backed up from /etc/network/interfaces on the working Pi, 2026-09-11.
+# Backed up from the working Pi, 2026-09-11.
+#
+# IMPORTANT: this file belongs at /boot/firmware/interfaces (the boot
+# partition — same FAT32 partition visible as a normal drive letter on
+# Windows/macOS), NOT at /etc/network/interfaces directly. pi-tail.service
+# copies /boot/firmware/interfaces over /etc/network/interfaces
+# unconditionally on every boot, so /boot/firmware/interfaces is the real,
+# persistent source of truth — see docs/TROUBLESHOOTING.md #6. Editing only
+# the /etc/ copy looks like it works (survives until the next reboot) but
+# silently reverts.
+#
 # This is the CORRECTED version — the "gateway 192.168.42.129" line under
-# the usb0 stanza has been removed (see docs/TROUBLESHOOTING.md #6). The
-# original, as-shipped file is what scripts/setup/01-fix-network-routing.sh
-# expects to find and patch.
+# the usb0 stanza has been removed (see docs/TROUBLESHOOTING.md #6).
+# scripts/setup/01-fix-network-routing.sh applies this same fix to
+# /boot/firmware/interfaces directly, and syncs it to /etc/ immediately.
 
 auto lo
 iface lo inet loopback

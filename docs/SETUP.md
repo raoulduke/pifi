@@ -6,8 +6,18 @@ doc is the "what to do," that one is the "why it's necessary."
 
 ## 1. Flash and boot
 
-1. Flash Kali pi-tail 2025.2 (or current) to a microSD card.
-2. Boot the Pi with just power connected (no hub/Alfa yet) and get it on
+1. Download the Kali pi-tail image:
+   **https://old.kali.org/arm-images/kali-2025.2/kali-linux-2025.2-raspberry-pi-zero-w-pitail-armel.img.xz**
+
+   This is **not** on the current kali.org downloads page — pi-tail builds
+   live on the `old.kali.org` ARM images mirror. If 2025.2 is no longer the
+   current release, browse
+   `https://old.kali.org/arm-images/` for the equivalent
+   `-raspberry-pi-zero-w-pitail-armel.img.xz` under whatever version
+   directory exists, using the same filename pattern.
+2. Flash it to a microSD card (Raspberry Pi Imager's "Use custom image," or
+   `dd`/Etcher directly onto the `.img` after decompressing the `.xz`).
+3. Boot the Pi with just power connected (no hub/Alfa yet) and get it on
    your WiFi hotspot far enough to SSH in:
    - SSH: `kali` / `kali`
    - The onboard chip is `wlan0` — this stays as the control-plane link for

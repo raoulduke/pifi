@@ -37,9 +37,13 @@ pentest-logs/    Dated write-ups of testing sessions against the home test netwo
 
 ## Recreating this on a new Pi
 
-1. Flash Kali pi-tail to a fresh SD card, boot it, and get it on the network
-   far enough to SSH in as `kali`/`kali` (default credentials — change these
-   for anything beyond a home lab).
+1. Flash Kali pi-tail to a fresh SD card — image:
+   [kali-linux-2025.2-raspberry-pi-zero-w-pitail-armel.img.xz](https://old.kali.org/arm-images/kali-2025.2/kali-linux-2025.2-raspberry-pi-zero-w-pitail-armel.img.xz)
+   (hosted on `old.kali.org`, not the current downloads page — see
+   [docs/SETUP.md](docs/SETUP.md#1-flash-and-boot) if this version is no
+   longer current). Boot it and get it on the network far enough to SSH in
+   as `kali`/`kali` (default credentials — change these for anything beyond
+   a home lab).
 2. Copy this repo onto the Pi (`git clone`, or `scp`) and run:
    ```
    cd pifi/scripts/setup

@@ -5,7 +5,7 @@
 | Component | Model | Notes |
 |---|---|---|
 | SBC | Raspberry Pi Zero W | Single Micro-USB OTG port, no separate power-managed USB hub circuitry |
-| OS | Kali Linux "pi-tail" 2025.2 | armv6l, kernel `6.12.20+rpt-rpi-v6` |
+| OS | Kali Linux "pi-tail" 2025.2 | armv6l, kernel `6.12.20+rpt-rpi-v6`. Image: [kali-linux-2025.2-raspberry-pi-zero-w-pitail-armel.img.xz](https://old.kali.org/arm-images/kali-2025.2/kali-linux-2025.2-raspberry-pi-zero-w-pitail-armel.img.xz) — hosted on `old.kali.org`, **not** the current kali.org downloads page, and easy to miss for that reason |
 | Wireless pentest adapter | Alfa AWUS036ACH | Chipset: Realtek RTL8812AU. Cable terminates in USB-C (device end) / USB-A (host end) |
 | USB hub | iCAN 5-Port USB 3.0 Hub w/ 12V 2A power adapter (RSH-A35) | **Must be self-powered** — see rationale below. Upstream connector is USB-B (printer-style), not USB-A |
 | OTG adapter | Micro-USB (male, OTG) → USB-A (female) | Must be explicitly OTG-wired (ID pin grounded), not a generic charge/sync cable |

@@ -41,7 +41,12 @@ This runs, in order:
 2. `02-fix-clock.sh` — forces an NTP resync (the Pi Zero W has no RTC and
    can drift wildly without internet access to correct it, which breaks
    TLS).
-3. `03-install-rtl8812au-driver.sh` — builds and installs the Alfa's
+3. `05-enable-mdns.sh` — turns on `avahi-daemon` (installed but inactive
+   by default on this image) so the Pi is reachable at
+   `kali-raspberry-pi-zero-w-pitail.local` instead of needing to look up
+   its current IP every time. Matters most for
+   [phone-only operation](#5-phone-only-operation-as-pi-tail-intends).
+4. `03-install-rtl8812au-driver.sh` — builds and installs the Alfa's
    driver via DKMS. **Budget 2-4 hours** for this on a Pi Zero W's single
    core. It runs detached, so you can disconnect and check back later —
    see the script's own output for how to check progress.
@@ -55,7 +60,7 @@ has to be a manual follow-up:
 sudo scripts/setup/04-pin-interface-names.sh
 sudo reboot
 ```
-4. `04-pin-interface-names.sh` — pins `wlan0`/`wlan1` to fixed names by MAC
+5. `04-pin-interface-names.sh` — pins `wlan0`/`wlan1` to fixed names by MAC
    address. Without this, which physical adapter ends up named `wlan0` vs
    `wlan1` is a boot-time race that can silently disconnect the intended
    control-plane interface — see
@@ -106,11 +111,42 @@ If this doesn't match, `04-pin-interface-names.sh` either wasn't run or
 didn't take effect yet (needs a reboot after running) — see
 [TROUBLESHOOTING.md #11](TROUBLESHOOTING.md).
 
-## 5. Day to day
+## 5. Phone-only operation (as pi-tail intends)
+
+The whole point of pi-tail is not needing a laptop — the device's own
+bundled README says as much: *"Install your favourite ssh and vnc client
+on your smartphone."* This is the primary intended way to run it day to
+day:
+
+1. Turn on the Pixel 3's hotspot (`P7802`). The Pi auto-connects to it
+   (already configured via the `mobile-1`/`mobile-2` WiFi profiles).
+2. Install an SSH client on the phone:
+   - **Termux** (recommended) — a real Linux terminal app. Gives you
+     `ssh` directly, and lets you run this repo's own scripts
+     (`set-alfa-mode.sh`, etc.) right from the phone over SSH.
+   - **ConnectBot** — simpler GUI-only SSH client.
+3. Connect by hostname, no IP lookup needed:
+   ```
+   ssh kali@kali-raspberry-pi-zero-w-pitail.local
+   ```
+   password `kali`. If `.local` resolution doesn't work in your chosen
+   app (mDNS support varies by Android app), fall back to checking
+   **Settings → Network & Internet → Hotspot & tethering → Wi-Fi hotspot
+   → connected devices** for the Pi's IP, or use a network scanner app
+   (e.g. Fing) to find it by MAC (the onboard chip's MAC, printed on the
+   Pi's board or captured during setup).
+4. From there, the workflow is identical to the laptop path (below) —
+   `sudo scripts/pentest/set-alfa-mode.sh monitor`, run your tools on
+   `wlan1`, write notes into `pentest-logs/`.
+
+## 6. Day to day (laptop-assisted alternative)
+
+If you do have a laptop on the same hotspot and prefer it for a given
+session:
 
 - `scripts/pentest/find-pi.sh` — locate the Pi's current IP without
   assuming a fixed address (hotspot DHCP ranges have been observed to
-  change between sessions).
+  change between sessions). Run from the laptop/WSL side.
 - `scripts/pentest/set-alfa-mode.sh monitor|managed` — flip the Alfa's mode
   without touching `wlan0`/SSH reachability.
 - Write session notes into `pentest-logs/` as you go.

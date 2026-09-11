@@ -12,6 +12,12 @@ carries an Alfa AWUS036ACH external wireless adapter. The onboard wifi
 (`wlan0`) stays in managed mode as the control-plane link; the Alfa
 (`wlan1`) runs in monitor mode for testing.
 
+**Intended to run entirely from the phone that hosts the hotspot** — no
+laptop required day to day. SSH in from a phone SSH client
+(Termux/ConnectBot) at `kali-raspberry-pi-zero-w-pitail.local`; the laptop
+is only for the one-time build/setup in this repo. See
+[docs/SETUP.md](docs/SETUP.md#5-phone-only-operation-as-pi-tail-intends).
+
 ```
 Phone hotspot ── wlan0 (managed, SSH/control) ── Pi Zero W
                                                        │ Micro-USB OTG
@@ -78,6 +84,7 @@ silently swap which physical adapter is `wlan0` vs `wlan1`.
 Working as of 2026-09-11: `wlan1` (Alfa) confirmed in monitor mode, driver
 built and installed via DKMS, network routing fixed persistently (in
 `/boot/firmware/interfaces`, the actual persistent source — not just the
-live `/etc/` copy), and `wlan0`/`wlan1` naming pinned by MAC address so it
-no longer depends on boot-time enumeration order. All verified across an
-actual reboot cycle, not just live/in-session.
+live `/etc/` copy), `wlan0`/`wlan1` naming pinned by MAC address so it no
+longer depends on boot-time enumeration order, and `avahi-daemon` enabled
+persistently for phone-only `.local` access. All verified across an actual
+reboot cycle, not just live/in-session.

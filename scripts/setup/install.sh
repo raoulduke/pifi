@@ -30,6 +30,10 @@ echo "  4. Pin wlan0/wlan1 to fixed names by MAC address (docs/TROUBLESHOOTING.m
 echo "     -- without this, which physical adapter gets called wlan0 vs wlan1 is a"
 echo "        boot-time race, and it can silently disconnect the intended"
 echo "        control-plane interface)"
+echo "  5. Enable persistent mDNS, so the Pi is reachable at"
+echo "     <hostname>.local instead of needing to look up its current IP --"
+echo "     matters most for phone-only operation with no laptop to run a"
+echo "     network sweep from"
 echo
 
 read -rp "Continue? [y/N] " confirm
@@ -37,6 +41,7 @@ read -rp "Continue? [y/N] " confirm
 
 bash "${SCRIPT_DIR}/01-fix-network-routing.sh"
 bash "${SCRIPT_DIR}/02-fix-clock.sh"
+bash "${SCRIPT_DIR}/05-enable-mdns.sh"
 bash "${SCRIPT_DIR}/03-install-rtl8812au-driver.sh"
 
 echo

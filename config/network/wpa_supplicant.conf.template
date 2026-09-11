@@ -1,0 +1,39 @@
+# Template for /etc/wpa_supplicant/wpa_supplicant.conf
+#
+# SECRETS ARE NOT COMMITTED. Copy this file, fill in real values, and run
+# it through wpa_passphrase (never hand-write a plaintext psk= line):
+#
+#   wpa_passphrase "YOUR_SSID" > /tmp/entry
+#   (paste the passphrase when prompted, then edit /tmp/entry to add
+#    id_str and priority before appending it into wpa_supplicant.conf)
+#
+# id_str values below must match the "iface <id_str> inet dhcp" stanza
+# names in config/network/interfaces.
+#
+# priority: higher number = preferred when multiple configured networks
+# are in range simultaneously.
+
+ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
+update_config=1
+country=US
+
+network={
+    ssid="YOUR_HOME_WIFI_SSID"
+    psk=REPLACE_WITH_WPA_PASSPHRASE_HASH_FROM_wpa_passphrase
+    id_str="home"
+    priority=2
+}
+
+network={
+    ssid="YOUR_MOBILE_HOTSPOT_SSID"
+    psk=REPLACE_WITH_WPA_PASSPHRASE_HASH_FROM_wpa_passphrase
+    id_str="mobile-1"
+    priority=10
+}
+
+network={
+    ssid="YOUR_SECOND_MOBILE_HOTSPOT_SSID"
+    psk=REPLACE_WITH_WPA_PASSPHRASE_HASH_FROM_wpa_passphrase
+    id_str="mobile-2"
+    priority=8
+}

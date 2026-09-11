@@ -1,0 +1,48 @@
+# Backed up from /etc/network/interfaces on the working Pi, 2026-09-11.
+# This is the CORRECTED version — the "gateway 192.168.42.129" line under
+# the usb0 stanza has been removed (see docs/TROUBLESHOOTING.md #6). The
+# original, as-shipped file is what scripts/setup/01-fix-network-routing.sh
+# expects to find and patch.
+
+auto lo
+iface lo inet loopback
+
+auto pan0
+iface pan0 inet dhcp
+  bridge_stp off
+  bridge_ports none
+
+# WiFi AP = Disable ## Leave commented out, only define Enable OR Disable
+                    ## When enabled, comment out the wlan0 stanza
+allow-hotplug wlan0
+iface wlan0 inet manual
+  wpa-roam /etc/wpa_supplicant/wpa_supplicant.conf
+  post-up iw wlan0 set power_save off
+
+iface home inet dhcp
+
+iface mobile-1 inet dhcp
+
+iface mobile-2 inet dhcp
+
+# Android defaults
+# NOTE: "gateway" line intentionally removed here — see
+# docs/TROUBLESHOOTING.md #6. This interface has no live link in this
+# build (the USB port is dedicated to the pentest hub/Alfa in host mode),
+# but ifupdown will still install a route from a "gateway" line even
+# when the interface itself is down, which shadows the real default
+# route via wlan0.
+allow-hotplug usb0
+iface usb0 inet static
+    address 192.168.42.254
+    netmask 255.255.255.0
+
+# PC
+allow-hotplug usb9
+iface usb9 inet static
+    address 192.168.44.254
+    netmask 255.255.255.0
+##    gateway 192.168.44.1
+
+allow-hotplug eth0
+iface eth0 inet dhcp

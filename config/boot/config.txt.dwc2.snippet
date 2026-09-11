@@ -1,0 +1,11 @@
+# Append to /boot/firmware/config.txt (or /boot/config.txt on older images).
+#
+# dr_mode=host is the important part: it forces the Pi's single USB
+# controller into host mode so it can drive the external powered hub +
+# Alfa adapter, rather than defaulting to gadget/OTG device mode.
+#
+# See docs/ARCHITECTURE.md for why this is mutually exclusive with USB
+# gadget tethering (g_ether) on this hardware.
+
+dtoverlay=dwc2,dr_mode=host
+dtoverlay=dwc2

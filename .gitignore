@@ -1,0 +1,24 @@
+# Packet captures and raw scan output — may contain credentials/traffic
+# from the network under test, and bloat the repo. Reference by
+# filename/hash in pentest-logs/ write-ups instead of committing these.
+*.pcap
+*.pcapng
+*.cap
+
+# Never commit real credentials — only committed files should be
+# .template files with placeholder values.
+wpa_supplicant.conf
+!config/network/wpa_supplicant.conf.template
+*.psk
+.env
+
+# Build artifacts if the driver source is ever vendored locally instead
+# of cloned fresh by the install script.
+*.o
+*.ko
+*.ko.xz
+build.log*
+
+# OS/editor noise
+.DS_Store
+Thumbs.db

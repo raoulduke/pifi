@@ -310,13 +310,31 @@ Automated (with MAC addresses detected dynamically, not hardcoded) in
 reboot to hold correctly.
 
 **Related:** `alfa-monitor-mode.service` (which puts `wlan1` into monitor
-mode) only actually fires at **boot** — its `BindsTo`/`After` on the
-`wlan1` device unit doesn't get re-evaluated for a live hotplug (e.g.
-unplugging and reconnecting the Alfa mid-session without rebooting).
-Confirmed by unplugging/replugging the Alfa: it came back in `managed`
-mode, and the service showed `inactive (dead)` rather than having fired.
-If you hotplug it back in without a reboot, just run
-`sudo systemctl start alfa-monitor-mode.service` manually afterward.
+mode) originally only fired at **boot** — its `WantedBy=multi-user.target`
+is a boot-time dependency that doesn't get re-evaluated for a live
+hotplug (e.g. unplugging and reconnecting the Alfa mid-session without
+rebooting). Confirmed by unplugging/replugging the Alfa: it came back in
+`managed` mode, and the service showed `inactive (dead)` rather than
+having fired.
+
+**Fixed** by adding a udev rule alongside the systemd unit
+(`/etc/udev/rules.d/99-alfa-monitor-mode.rules`), which tags the `wlan1`
+device's "add" event with `SYSTEMD_WANTS=alfa-monitor-mode.service` —
+this gets re-evaluated by systemd on *every* appearance of that device,
+not just at boot:
+```
+ACTION=="add", SUBSYSTEM=="net", NAME=="wlan1", TAG+="systemd", ENV{SYSTEMD_WANTS}+="alfa-monitor-mode.service"
+```
+Automated in `scripts/setup/06-enable-alfa-monitor-boot.sh`. Verified with
+an actual physical unplug/replug of the Alfa: came back in `monitor` mode
+automatically, no manual `systemctl start` needed.
+
+(A synthetic `udevadm trigger --action=add` on the already-known device
+did **not** reproduce this — the udev property was set correctly
+[confirmed via `udevadm info`], but didn't cause systemd to re-evaluate
+it. Only a genuine physical replug, generating a real kernel add event,
+proved this actually works. Don't trust a synthetic trigger as a
+substitute for testing this kind of hotplug behavior.)
 
 **Diagnostic tip:** if a reboot is taking unusually long to become
 reachable at the expected address, don't assume a hang — sweep the whole

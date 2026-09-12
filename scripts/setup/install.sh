@@ -34,6 +34,9 @@ echo "  5. Enable persistent mDNS, so the Pi is reachable at"
 echo "     <hostname>.local instead of needing to look up its current IP --"
 echo "     matters most for phone-only operation with no laptop to run a"
 echo "     network sweep from"
+echo "  6. (manual follow-up, after driver build + hardware connected) Enable"
+echo "     alfa-monitor-mode.service, so wlan1 boots straight into monitor"
+echo "     mode instead of needing a manual set-alfa-mode.sh every time"
 echo
 
 read -rp "Continue? [y/N] " confirm
@@ -51,7 +54,10 @@ echo "run separately:"
 echo "  sudo ${SCRIPT_DIR}/04-pin-interface-names.sh"
 echo "  sudo reboot"
 echo
+echo "Then, once the Alfa is plugged in and its driver bound:"
+echo "  sudo ${SCRIPT_DIR}/06-enable-alfa-monitor-boot.sh"
+echo
 echo "Then verify with:"
-echo "  ../pentest/set-alfa-mode.sh monitor"
 echo "  iw dev    # should show wlan0 (managed, onboard, associated to your"
-echo "            # hotspot) and wlan1 (Alfa, monitor)"
+echo "            # hotspot) and wlan1 (Alfa, monitor -- automatically, no"
+echo "            # manual set-alfa-mode.sh needed anymore)"

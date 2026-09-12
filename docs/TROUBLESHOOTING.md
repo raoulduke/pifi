@@ -341,3 +341,47 @@ ModemManager, etc.) be stopped to speed up the build?
 build shows the compiler already at ~80-128% of the single core, with
 everything else at ~0%, and load average pinned at ~1.0 — i.e. the core is
 already fully committed to the build. There's no contention to reclaim.
+
+---
+
+### 14. Connecting from Termux (phone-only, no laptop) has several gotchas
+
+Encountered getting phone-only operation actually working on a Pixel 3
+with no Google Play Store (Termux via F-Droid/sideload). None of these are
+bugs in this project — they're Android/Termux platform quirks worth
+knowing up front rather than debugging live.
+
+**`pkg update`/`pkg install` fails with "No mirror or mirror group
+selected."** Termux's mirror config sometimes doesn't get set on first
+install. Fix: `termux-change-repo`, pick a mirror group, then a specific
+region close to you rather than "All" (more reliable). Retry afterward.
+
+**`ssh kali@<hostname>.local` fails to resolve, even though the same
+hostname resolves fine from Windows/macOS.** Android's underlying C
+library doesn't do mDNS resolution for plain command-line POSIX tools the
+way desktop OS resolvers do — this isn't specific to our `avahi-daemon`
+setup, it's a Termux/Android platform limitation. Don't rely on `.local`
+working from Termux's `ssh`; find the Pi by IP instead (see below).
+
+**The hotspot's own AP interface is not always `wlan0`.** On the Pixel 3
+used here, `wlan0` was the phone's *regular* WiFi client connection (e.g.
+to home WiFi), while `wlan1` was the hotspot's own AP interface with its
+own subnet. Running `ip addr show wlan0` from Termux while troubleshooting
+returned an entirely different, unrelated network (a home router's
+`10.0.0.0/24`, with 9 other devices on it) — not the hotspot at all. This
+interface naming is phone/Android-version-specific; check both `wlan0` and
+`wlan1` if scans come up with the wrong network.
+
+**Unprivileged (non-rooted) `nmap` in Termux can't show MAC addresses** —
+ARP-level discovery needs raw socket access. Workaround: scan for the SSH
+port directly instead of doing a plain ping sweep, which isolates the Pi
+without needing MAC at all:
+```
+nmap -p22 --open <hotspot-subnet>/24
+```
+
+**Practical result of all of the above** — the actual working phone-only
+flow, and a reusable one-command connect helper, are in
+[SETUP.md's phone-only section](SETUP.md#5-phone-only-operation-as-pi-tail-intends)
+and
+[scripts/pentest/termux-bashrc-snippet.sh](../scripts/pentest/termux-bashrc-snippet.sh).

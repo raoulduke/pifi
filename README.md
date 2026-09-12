@@ -58,18 +58,19 @@ pentest-logs/    Dated write-ups of testing sessions against the home test netwo
    (kicks off network/clock fixes immediately, then a 2-4 hour driver
    build in the background)
 3. Assemble the USB hardware chain per [docs/HARDWARE.md](docs/HARDWARE.md).
-4. Once the driver build finishes, pin interface names and reboot:
+4. Once the driver build finishes, pin interface names, enable
+   monitor-mode-on-boot, and reboot:
    ```
    sudo scripts/setup/04-pin-interface-names.sh
+   sudo scripts/setup/06-enable-alfa-monitor-boot.sh
    sudo reboot
    ```
 5. Verify:
    ```
-   scripts/pentest/set-alfa-mode.sh monitor
    iw dev
    ```
    You should see `wlan0` (onboard, managed, associated to your hotspot)
-   and `wlan1` (Alfa, monitor mode).
+   and `wlan1` (Alfa, already in monitor mode — no manual step needed).
 
 Full step-by-step narrative, including everything that went wrong the first
 time and why, is in [docs/SETUP.md](docs/SETUP.md) and
@@ -85,6 +86,9 @@ Working as of 2026-09-11: `wlan1` (Alfa) confirmed in monitor mode, driver
 built and installed via DKMS, network routing fixed persistently (in
 `/boot/firmware/interfaces`, the actual persistent source — not just the
 live `/etc/` copy), `wlan0`/`wlan1` naming pinned by MAC address so it no
-longer depends on boot-time enumeration order, and `avahi-daemon` enabled
-persistently for phone-only `.local` access. All verified across an actual
-reboot cycle, not just live/in-session.
+longer depends on boot-time enumeration order, `avahi-daemon` enabled
+persistently (short hostname `pitail.local`), and `wlan1` now boots
+straight into monitor mode automatically via a systemd service. Phone-only
+operation from Termux (no Play Store, no laptop) confirmed working
+end-to-end, including a one-command connect helper. All verified across
+actual reboot cycles, not just live/in-session.

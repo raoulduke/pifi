@@ -58,6 +58,7 @@ around for the multi-hour build or for you to plug in hardware, so this
 has to be a manual follow-up:
 ```
 sudo scripts/setup/04-pin-interface-names.sh
+sudo scripts/setup/06-enable-alfa-monitor-boot.sh
 sudo reboot
 ```
 5. `04-pin-interface-names.sh` — pins `wlan0`/`wlan1` to fixed names by MAC
@@ -67,6 +68,13 @@ sudo reboot
    [TROUBLESHOOTING.md #11](TROUBLESHOOTING.md). **Reboot after running
    this** to confirm it actually took effect; don't just trust that it
    silently worked.
+6. `06-enable-alfa-monitor-boot.sh` — a systemd service that puts `wlan1`
+   into monitor mode automatically on every boot, bound to the `wlan1`
+   device unit (which only reliably means the Alfa because of step 5's
+   naming pin). Without this, monitor mode does not persist across
+   reboots — `wlan1` comes back up in plain `managed` mode every time, and
+   you'd need `sudo scripts/pentest/set-alfa-mode.sh monitor` manually
+   before every session.
 
 ## 3. Assemble the USB hardware chain
 
@@ -93,6 +101,13 @@ lsusb                      # should show the hub (Realtek RTS5411) and the
                             # Alfa (0bda:8812)
 lsmod | grep 88XXau        # driver loaded
 iw dev                      # wlan0 (managed, onboard) + wlan1 (Alfa)
+iw dev wlan1 info          # if 06-enable-alfa-monitor-boot.sh has been run
+                            # and the Pi rebooted since, this already shows
+                            # "type monitor" with no manual step needed
+```
+If `wlan1` isn't already in monitor mode (e.g. you haven't run
+`06-enable-alfa-monitor-boot.sh`/rebooted yet), set it manually:
+```
 sudo scripts/pentest/set-alfa-mode.sh monitor
 iw dev wlan1 info          # confirms "type monitor"
 ```
@@ -116,28 +131,63 @@ didn't take effect yet (needs a reboot after running) — see
 The whole point of pi-tail is not needing a laptop — the device's own
 bundled README says as much: *"Install your favourite ssh and vnc client
 on your smartphone."* This is the primary intended way to run it day to
-day:
+day. Below is the actual working setup on a Pixel 3 with **no Google Play
+Store access** (Termux installed via F-Droid/sideload) — everything here
+uses only Termux's own package repo.
 
-1. Turn on the Pixel 3's hotspot (`P7802`). The Pi auto-connects to it
-   (already configured via the `mobile-1`/`mobile-2` WiFi profiles).
-2. Install an SSH client on the phone:
-   - **Termux** (recommended) — a real Linux terminal app. Gives you
-     `ssh` directly, and lets you run this repo's own scripts
-     (`set-alfa-mode.sh`, etc.) right from the phone over SSH.
-   - **ConnectBot** — simpler GUI-only SSH client.
-3. Connect by hostname, no IP lookup needed:
+1. Turn on the Pixel 3's hotspot. The Pi auto-connects to it (already
+   configured via the `mobile-1`/`mobile-2` WiFi profiles).
+2. In Termux, get a real SSH client and `nmap` (both from Termux's own
+   repo, nothing Play-Store-related):
    ```
-   ssh kali@pitail.local
+   pkg install openssh nmap
    ```
-   password `kali`. If `.local` resolution doesn't work in your chosen
-   app (mDNS support varies by Android app), fall back to checking
-   **Settings → Network & Internet → Hotspot & tethering → Wi-Fi hotspot
-   → connected devices** for the Pi's IP, or use a network scanner app
-   (e.g. Fing) to find it by MAC (the onboard chip's MAC, printed on the
-   Pi's board or captured during setup).
-4. From there, the workflow is identical to the laptop path (below) —
-   `sudo scripts/pentest/set-alfa-mode.sh monitor`, run your tools on
-   `wlan1`, write notes into `pentest-logs/`.
+   If `pkg update`/`install` fails with **"No mirror or mirror group
+   selected"**, run `termux-change-repo`, pick a mirror group, then a
+   region close to you (not "All" — regional mirrors are more reliable),
+   and retry.
+3. **`.local` (mDNS) hostname resolution does not work from Termux's
+   command-line `ssh`**, even though it works fine from Windows/macOS —
+   Android's underlying C library doesn't do mDNS resolution for plain
+   POSIX tools the way desktop OSes do. Don't rely on
+   `ssh kali@pitail.local` working here. Find the Pi by IP instead:
+   ```
+   ip addr show wlan1
+   ```
+   (**not** `wlan0` — on this phone, `wlan0` is the *regular* WiFi client
+   connection, e.g. to home WiFi; `wlan1` is the hotspot's own AP
+   interface. This can vary by phone/Android version — check both if
+   unsure.) Note the IP shown (e.g. `192.168.3.130`), then scan that
+   `/24` specifically for the SSH port, which isolates the Pi
+   unambiguously without needing MAC visibility (unprivileged Termux
+   can't do ARP-level MAC discovery anyway):
+   ```
+   nmap -p22 --open 192.168.3.0/24
+   ```
+4. Connect:
+   ```
+   ssh kali@<ip-found-above>
+   ```
+   password `kali`.
+5. **Set up SSH keys once, so it never prompts for a password again:**
+   ```
+   ssh-keygen -t ed25519
+   ssh-copy-id kali@<ip>
+   ```
+6. **Make future connects one command**, immune to the hotspot's subnet
+   changing (observed to happen between sessions): add
+   [`scripts/pentest/termux-bashrc-snippet.sh`](../scripts/pentest/termux-bashrc-snippet.sh)'s
+   contents to `~/.bashrc` in Termux (create the file if it doesn't
+   already exist — `cat >> ~/.bashrc` works either way), then
+   `source ~/.bashrc`. From then on, just run:
+   ```
+   pi
+   ```
+   and it finds and connects to the Pi automatically.
+7. From there, the workflow is identical to the laptop path (below) — run
+   your tools on `wlan1` (already in monitor mode automatically if
+   `06-enable-alfa-monitor-boot.sh` was run during setup — see below),
+   write notes into `pentest-logs/`.
 
 ## 6. Day to day (laptop-assisted alternative)
 

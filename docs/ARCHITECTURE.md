@@ -121,6 +121,14 @@ Fixed via `systemd-networkd` `.link` files matching each chip's MAC address
 (`scripts/setup/04-pin-interface-names.sh`), so the names in the table
 above are now guaranteed, not just the common case.
 
+Because that naming is now guaranteed, `wlan1` can also be trusted at boot
+time by a systemd service (`scripts/setup/06-enable-alfa-monitor-boot.sh`)
+that puts it straight into monitor mode automatically — monitor mode
+itself does not otherwise persist across reboots, so without the naming
+pin, binding a boot-time service to "wlan1" would be unreliable (it might
+put the *onboard chip* into monitor mode on a boot where the race went the
+other way, exactly the failure this whole section describes).
+
 ## USB power domain
 
 The Pi's own 5V rail is separate from the hub's 12V/2A wall supply. The Alfa

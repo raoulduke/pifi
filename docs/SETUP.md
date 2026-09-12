@@ -217,3 +217,61 @@ session:
   `whiptail` rather than `fzf` — see
   [TROUBLESHOOTING.md #16](TROUBLESHOOTING.md) for why.
 - Write session notes into `pentest-logs/` as you go.
+
+### Laptop-side shell aliases
+
+These live in the laptop's own `~/.bash_aliases` (personal shell config,
+not part of this repo) — noted here so the reasoning behind them isn't
+lost. All wrap `scripts/pentest/find-pi.sh`.
+
+```bash
+alias findpi='bash /mnt/c/Users/mattk/code/pi/pifi/scripts/pentest/find-pi.sh --no-connect'
+
+ssh() {
+  if [[ "$1" == "pifi" ]]; then
+    local ip
+    ip=$(awk '/^Host pifi$/{f=1} f && /HostName/{print $2; exit}' ~/.ssh/config)
+    if [[ -n "$ip" ]] && timeout 3 bash -c "echo > /dev/tcp/$ip/22" 2>/dev/null; then
+      command ssh "$@"
+    else
+      echo "pifi unreachable at ${ip:-<unset>} -- searching for it..." >&2
+      bash /mnt/c/Users/mattk/code/pi/pifi/scripts/pentest/find-pi.sh
+    fi
+  else
+    command ssh "$@"
+  fi
+}
+
+syncpifi() {
+  local ip
+  ip=$(awk '/^Host pifi$/{f=1} f && /HostName/{print $2; exit}' ~/.ssh/config)
+  if [[ -z "${ip}" ]] || ! timeout 3 bash -c "echo > /dev/tcp/${ip}/22" 2>/dev/null; then
+    echo "pifi unreachable at ${ip:-<unset>} -- searching for it..." >&2
+    bash /mnt/c/Users/mattk/code/pi/pifi/scripts/pentest/find-pi.sh --no-connect
+    ip=$(awk '/^Host pifi$/{f=1} f && /HostName/{print $2; exit}' ~/.ssh/config)
+  fi
+  rsync -avz --exclude='.git' --delete /mnt/c/Users/mattk/code/pi/pifi/ "kali@${ip}:~/pifi/"
+}
+```
+
+- **`findpi`** — locate the Pi and update `~/.ssh/config`, without
+  connecting.
+- **`ssh pifi`** — a shell *function* (not a plain alias — needed for the
+  conditional logic), overriding just the `ssh` command name. Every other
+  host passes straight through untouched (`command ssh "$@"`). Only
+  `pifi` specifically gets the reachability check, falling back to a full
+  search if the configured address doesn't answer.
+- **`syncpifi`** — pushes the local repo onto the Pi's copy (`~/pifi`
+  there) via `rsync`. Needed because that copy can't be `git clone`d
+  directly on the Pi (the repo is private) — see
+  [TROUBLESHOOTING.md #6](TROUBLESHOOTING.md) for background on why the
+  Pi's `~/pifi` isn't its own git checkout. `rsync` spawns its own `ssh`
+  subprocess directly, which does **not** go through the `ssh()` function
+  above (shell functions aren't visible to child processes), so the same
+  reachable-check-then-search fallback is duplicated here rather than
+  relying on that function.
+
+A pre-existing, unrelated `pifi` alias (`cd` into this repo's directory)
+already existed on this laptop before any of the above — kept as-is, no
+naming collision, since the SSH alias is invoked as `ssh pifi` (two
+words) rather than a bare `pifi` command.

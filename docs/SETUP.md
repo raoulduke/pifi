@@ -175,7 +175,9 @@ uses only Termux's own package repo.
    ssh-copy-id kali@<ip>
    ```
 6. **Make future connects one command**, immune to the hotspot's subnet
-   changing (observed to happen between sessions): add
+   changing (observed to happen between sessions), *and* to the Pi
+   itself falling back to a saved home-WiFi profile instead of the
+   hotspot (see [TROUBLESHOOTING.md #15](TROUBLESHOOTING.md)): add
    [`scripts/pentest/termux-bashrc-snippet.sh`](../scripts/pentest/termux-bashrc-snippet.sh)'s
    contents to `~/.bashrc` in Termux (create the file if it doesn't
    already exist — `cat >> ~/.bashrc` works either way), then
@@ -183,7 +185,13 @@ uses only Termux's own package repo.
    ```
    pi
    ```
-   and it finds and connects to the Pi automatically.
+   and it finds and connects to the Pi automatically — it tries both
+   `wlan0` (regular WiFi client) and `wlan1` (hotspot AP), scanning
+   whichever one actually has an address, so it works whether the Pi is
+   on the phone's own hotspot or has fallen back to home WiFi. If a
+   given Android/Termux version blocks `ip addr` on an interface with a
+   netlink permission error, it says so explicitly rather than
+   misreporting that interface as simply "not up."
 7. From there, the workflow is identical to the laptop path (below) — run
    your tools on `wlan1` (already in monitor mode automatically if
    `06-enable-alfa-monitor-boot.sh` was run during setup — see below),

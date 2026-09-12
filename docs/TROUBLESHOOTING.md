@@ -484,3 +484,36 @@ support, and it's already installed on this image. `dialog` is also
 present as an alternative with a similar API.
 `scripts/pentest/attack-menu.sh` uses `whiptail --menu` for exactly this
 reason.
+
+---
+
+### 17. Termux's `pi()` helper only worked in hotspot mode, not home-WiFi fallback
+
+**Symptom:** Running `pi` (the Termux `~/.bashrc` helper from
+[`scripts/pentest/termux-bashrc-snippet.sh`](../scripts/pentest/termux-bashrc-snippet.sh))
+reported `Hotspot interface (wlan1) not up` even though the Pi was
+genuinely reachable — it was just on the phone's home WiFi (see #15's
+fallback-profile behavior), not the phone's own hotspot, at the time.
+
+**Root cause:** the original `pi()` only ever checked `wlan1` (the
+phone's hotspot AP interface on that Pixel 3), because it was written
+assuming the Pi would always be reached via the phone's own hotspot. It
+had no path for the "Pi fell back to a saved home-WiFi profile" case,
+where the relevant interface is instead `wlan0` — the phone's regular
+WiFi client connection to that same network.
+
+**Compounding issue found in the same investigation:** `ip addr show
+<iface>` can fail outright with `Cannot bind netlink socket: Permission
+denied` on some Android/Termux versions (hit on a Pixel 8 in this same
+session) — a platform sandboxing restriction on raw netlink access,
+unrelated to whether the interface is actually up. The original script
+suppressed this error (`2>/dev/null`), so a permission failure and a
+genuinely-down interface were indistinguishable — both just silently
+produced no IP and were reported as "not up."
+
+**Fix:** `pi()` now tries both `wlan0` and `wlan1` in turn, scanning
+whichever one actually has an IPv4 address (works for either the
+hotspot-mode or home-WiFi-fallback case without needing to know which
+one is active), and explicitly detects and reports the netlink
+permission error separately from a genuinely-absent address, so it
+doesn't misdiagnose one as the other.

@@ -191,7 +191,13 @@ uses only Termux's own package repo.
    on the phone's own hotspot or has fallen back to home WiFi. If a
    given Android/Termux version blocks `ip addr` on an interface with a
    netlink permission error, it says so explicitly rather than
-   misreporting that interface as simply "not up."
+   misreporting that interface as simply "not up." It also remembers
+   the last IP the Pi was actually found at
+   (`~/.cache/pi_last_ip` in Termux) and tries a plain, near-instant TCP
+   connect to it first — the common case is the Pi hasn't actually
+   moved, so this skips the multi-second subnet scan entirely most of
+   the time, only falling back to the full scan when that quick check
+   fails.
 7. From there, the workflow is identical to the laptop path (below) — run
    your tools on `wlan1` (already in monitor mode automatically if
    `06-enable-alfa-monitor-boot.sh` was run during setup — see below),

@@ -309,6 +309,15 @@ Automated (with MAC addresses detected dynamically, not hardcoded) in
 `scripts/setup/04-pin-interface-names.sh`. Verified across an actual
 reboot to hold correctly.
 
+**Related:** `alfa-monitor-mode.service` (which puts `wlan1` into monitor
+mode) only actually fires at **boot** — its `BindsTo`/`After` on the
+`wlan1` device unit doesn't get re-evaluated for a live hotplug (e.g.
+unplugging and reconnecting the Alfa mid-session without rebooting).
+Confirmed by unplugging/replugging the Alfa: it came back in `managed`
+mode, and the service showed `inactive (dead)` rather than having fired.
+If you hotplug it back in without a reboot, just run
+`sudo systemctl start alfa-monitor-mode.service` manually afterward.
+
 **Diagnostic tip:** if a reboot is taking unusually long to become
 reachable at the expected address, don't assume a hang — sweep the whole
 subnet's ARP table for *both* known MAC prefixes before concluding it's

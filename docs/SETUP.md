@@ -220,10 +220,16 @@ session:
   without touching `wlan0`/SSH reachability.
 - `scripts/pentest/attack-menu.sh` (run on the Pi itself, `sudo` — aliased
   to `attack` in the Pi's own `~/.bashrc`) — interactive arrow-key menu:
-  scan for nearby networks, pick one; scan for devices connected to it,
-  pick one; pick an attack (currently: continuous deauth); run it. Uses
-  `whiptail` rather than `fzf` — see
-  [TROUBLESHOOTING.md #16](TROUBLESHOOTING.md) for why.
+  scan for nearby networks (2.4GHz + 5GHz, with a live progress gauge),
+  pick one; scan for devices connected to it, each already labeled with
+  a resolved device name or vendor right in the list; pick one; pick an
+  attack (currently: continuous deauth); run it. Uses `whiptail` rather
+  than `fzf` — see [TROUBLESHOOTING.md #16](TROUBLESHOOTING.md) for why.
+  Device identification is passive-only: MAC vendor and previously
+  probed SSIDs are always available (cleartext 802.11 management
+  frames), but a DHCP/mDNS/NetBIOS device name only resolves on an
+  *open* network — WPA/WPA2 encrypts data frames, and no attempt is
+  made to obtain or crack a passphrase to get past that.
 - Write session notes into `pentest-logs/` as you go.
 
 ### Laptop-side shell aliases

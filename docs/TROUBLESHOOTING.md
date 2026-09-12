@@ -517,3 +517,52 @@ hotspot-mode or home-WiFi-fallback case without needing to know which
 one is active), and explicitly detects and reports the netlink
 permission error separately from a genuinely-absent address, so it
 doesn't misdiagnose one as the other.
+
+---
+
+### 18. `attack` (`attack-menu.sh` via `sudo`) looks like it hangs forever after the password prompt
+
+**Symptom:** Running `attack` (or `sudo scripts/pentest/attack-menu.sh`
+directly), entering the `kali` sudo password, and then... nothing.
+No output, no menu, no error — indistinguishable from a genuine hang.
+
+**Root cause:** the script is a non-interactive `bash script.sh`
+invocation, which means bash's job control (`monitor` mode) is off by
+default — that's normally invisible, but this script runs full-screen
+terminal programs (`whiptail`, `airodump-ng`) that do real terminal
+ioctls (redrawing, or resetting terminal state on exit). Without job
+control, bash never hands foreground-process-group ownership of the
+terminal over to those child processes when it runs them — so the
+first time one of them touches the terminal while not actually the
+foreground process group, the kernel stops it with `SIGTTOU`/`SIGTTIN`
+(process shows as `T` in `ps`). It isn't backgrounded and isn't making
+progress; it's frozen until something sends it `SIGCONT` in the right
+context, which won't happen on its own. Confirmed with `ps -eo
+pid,ppid,pgid,tty,stat,cmd` showing `airodump-ng` (and its wrapping
+`timeout`) sitting in state `T`.
+
+**False lead investigated first:** `/etc/sudoers` has `Defaults
+use_pty` set globally (a Debian/Kali hardening default), and `sudo`'s
+internal fork/monitor architecture under `use_pty` does put the actual
+command on a second, freshly-allocated pty distinct from the invoking
+terminal's — which looked like a very plausible cause of exactly this
+class of job-control confusion, and was the first fix attempted (a
+per-command `Defaults!` override in `/etc/sudoers.d/` disabling
+`use_pty` just for this script). That change was verified to actually
+take effect (confirmed via `sudo -ll`, and by the process tree
+collapsing from two ptys to one) but the hang persisted identically
+even on a single pty — proving `use_pty` was not the actual cause. It
+was removed again once the real cause (below) was found and confirmed
+to fix it on its own. Worth recording so this isn't re-investigated
+from scratch next time — the two-pty split from `use_pty` is a red
+herring here, not nothing (it's real, and worth knowing about for
+other scenarios), just not the cause of *this* symptom.
+
+**Fix:** added `set -m` near the top of `attack-menu.sh`, turning job
+control on for this non-interactive script. Confirmed fixed by running
+the full flow under a real SSH-allocated pty (not wrapped in `script`,
+which turned out to add its own confounding pty layer during
+investigation) and checking `ps` throughout — `airodump-ng` and
+`whiptail` both ran and rendered correctly with no `T`-state processes
+at any point, including at the natural end of the 10-second scan
+(previously the exact point it froze).

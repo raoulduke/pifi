@@ -436,3 +436,24 @@ and correctly scopes the ARP match per-interface as described above. It
 reports exactly which interface/network it actually found the Pi on, so
 a mismatch like this is visible immediately instead of silently
 misleading.
+
+---
+
+### 16. `fzf` isn't available on this board's architecture at all
+
+**Symptom:** `apt-get install fzf` fails with "Unable to locate package,"
+even after `apt-get update`.
+
+**Root cause:** the Pi Zero W is `armel` (soft-float ARMv6, for the older
+ARM1176 core) — not `armhf`, and not `arm64`. `fzf` is written in Go, and
+Kali doesn't build/ship a Go toolchain output for `armel` at all (`apt-cache
+search fzf` / `apt-cache policy fzf` come back completely empty, not just
+"not installed" — the package doesn't exist for this architecture,
+period). This applies to other Go-based CLI tools too, not just `fzf`.
+
+**Fix:** use `whiptail` instead for anything needing an interactive
+arrow-key menu — it's a small, old, C-based (`newt`) tool with real armel
+support, and it's already installed on this image. `dialog` is also
+present as an alternative with a similar API.
+`scripts/pentest/attack-menu.sh` uses `whiptail --menu` for exactly this
+reason.

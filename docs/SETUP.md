@@ -210,4 +210,10 @@ session:
   update the alias without opening a session.
 - `scripts/pentest/set-alfa-mode.sh monitor|managed` — flip the Alfa's mode
   without touching `wlan0`/SSH reachability.
+- `scripts/pentest/attack-menu.sh` (run on the Pi itself, `sudo` — aliased
+  to `attack` in the Pi's own `~/.bashrc`) — interactive arrow-key menu:
+  scan for nearby networks, pick one; scan for devices connected to it,
+  pick one; pick an attack (currently: continuous deauth); run it. Uses
+  `whiptail` rather than `fzf` — see
+  [TROUBLESHOOTING.md #16](TROUBLESHOOTING.md) for why.
 - Write session notes into `pentest-logs/` as you go.

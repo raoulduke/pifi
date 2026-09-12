@@ -194,9 +194,20 @@ uses only Termux's own package repo.
 If you do have a laptop on the same hotspot and prefer it for a given
 session:
 
-- `scripts/pentest/find-pi.sh` — locate the Pi's current IP without
-  assuming a fixed address (hotspot DHCP ranges have been observed to
-  change between sessions). Run from the laptop/WSL side.
+- `scripts/pentest/find-pi.sh` — finds and connects to the Pi regardless
+  of which network it's currently on. Sweeps **every** active network
+  interface on the laptop (not just one assumed subnet — this laptop can
+  have several active at once: its own WiFi client connection, a hosted
+  Windows Mobile Hotspot's virtual AP, VirtualBox/VPN adapters, etc.),
+  matching on the onboard chip's fixed MAC address rather than any
+  particular IP — reliable even when the Pi has fallen back to a
+  completely different saved WiFi profile (e.g. `home`) than the one you
+  expected. Reports which network it actually found it on, updates the
+  `pifi` SSH alias (`~/.ssh/config`) to the current address automatically,
+  and connects. Run from the laptop/WSL side (needs `powershell.exe`, i.e.
+  WSL2 on Windows — plain WSL/Linux networking can't see the Windows
+  host's other interfaces). Add `--no-connect` to just locate it and
+  update the alias without opening a session.
 - `scripts/pentest/set-alfa-mode.sh monitor|managed` — flip the Alfa's mode
   without touching `wlan0`/SSH reachability.
 - Write session notes into `pentest-logs/` as you go.

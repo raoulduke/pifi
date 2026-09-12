@@ -62,9 +62,10 @@ arbitrary, it just didn't match this particular phone's behavior.
 `192.168.108.x`, then `192.168.145.x`, then `192.168.3.x` were all observed
 from the same Pixel 3 hotspot across different sessions.
 
-**Fix:** Don't assume a fixed IP. Sweep the subnet for the Pi's MAC
-(`b8:27:eb:...` for the onboard interface) instead of pinging a remembered
-address. `scripts/pentest/find-pi.sh` does this.
+**Fix:** Don't assume a fixed IP, or even a fixed *network*. Sweep for the
+Pi's MAC (`b8:27:eb:...` for the onboard interface) rather than pinging a
+remembered address. `scripts/pentest/find-pi.sh` does this — see #15 for
+why it has to sweep every active local interface, not just one.
 
 **Pitfall:** the hotspot's own gateway address (the phone itself) will also
 show up in a ping sweep and can look like a plausible candidate — check
@@ -385,3 +386,53 @@ flow, and a reusable one-command connect helper, are in
 [SETUP.md's phone-only section](SETUP.md#5-phone-only-operation-as-pi-tail-intends)
 and
 [scripts/pentest/termux-bashrc-snippet.sh](../scripts/pentest/termux-bashrc-snippet.sh).
+
+---
+
+### 15. The Pi can end up on an entirely different network than expected
+
+**Symptom:** Tried standing up a substitute WiFi hotspot (same SSID/
+password as the usual one, hosted from the laptop via Windows Mobile
+Hotspot, because the phone that normally hosts it was unavailable) — band
+confirmed correct (2.4GHz, matching the Pi's onboard-chip-only hardware
+capability), password confirmed correct, and still zero clients ever
+showed up on that hotspot's subnet.
+
+**Root cause:** the Pi has multiple saved WiFi profiles with different
+priorities (`mobile-1`/`mobile-2` high priority for phone hotspots, `home`
+low priority as a fallback). When it couldn't successfully join the
+freshly-created hotspot for some reason, it didn't just sit disconnected —
+it fell through to the next reachable saved network in its list, which
+happened to be the actual home WiFi network, landing it on a completely
+different subnet than anyone was looking at. This is correct,
+expected `wpa_supplicant` priority-fallback behavior, not a bug — but it
+means **"which network is the Pi actually on" is not always the one you
+just tried to give it.**
+
+**Compounding factor — the laptop itself can have several active network
+interfaces simultaneously**, and the Pi could be reachable via any one of
+them: its own regular WiFi client connection, a hosted Windows Mobile
+Hotspot's virtual AP interface, VirtualBox/VPN virtual adapters, etc. A
+sweep of just one assumed subnet (even the "obviously right" one) can
+miss it entirely if it's actually sitting on a different interface's
+network.
+
+**A related bug hit while building the fix for this:** `arp -a` on
+Windows returns **every** interface's ARP table in one combined output.
+A naive `arp -a | Select-String <mac>` search — without scoping to the
+specific interface section currently being tested — can match a **stale
+cached entry from a completely different, previously-swept network**,
+producing a result that's the right IP but attributed to the wrong
+interface/network (misleading, and in principle could also surface a
+now-stale/wrong IP if the real device has since moved on). Fix: parse
+`arp -a`'s output section-by-section, matching only within the block
+whose own `Interface: <ip>` header corresponds to the subnet just swept.
+
+**Practical fix for all of the above:** don't guess which network or
+interface the Pi is on. `scripts/pentest/find-pi.sh` enumerates every
+active local interface on the laptop, computes each one's actual subnet
+from its own IP/prefix length (not an assumed `/24`), sweeps each in turn,
+and correctly scopes the ARP match per-interface as described above. It
+reports exactly which interface/network it actually found the Pi on, so
+a mismatch like this is visible immediately instead of silently
+misleading.

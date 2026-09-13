@@ -637,3 +637,36 @@ time/status each second, and `read -r -t 1 key` (a real bash builtin
 with its own timeout) to both wait ~1s AND check for a `q` keypress in
 the same step. Simpler and more reliable here than depending on a flag
 this particular build doesn't have.
+
+---
+
+### 21. Two subtle bugs writing the nmap-model-info parsing (UPnP/DNS-SD)
+
+Found while adding active UPnP/DNS-SD device-model lookups to
+`attack-menu.sh`'s device-info screen (unable to test against real
+devices at the time — the Pi was on an away hotspot unreachable from
+the machine doing the writing — caught instead with a synthetic nmap
+output sample built from the documented NSE output format). Recording
+both since they're generic pitfalls, not specific to this one script.
+
+**Bug 1 — `paste -sd', ' -` doesn't do what it looks like it does.**
+`paste -d` treats a *multi-character* delimiter argument as **separate
+delimiter characters to cycle through per join**, not one two-character
+delimiter — so joining `80/tcp`, `1900/udp`, `5353/udp` with `-d', '`
+produces `80/tcp,1900/udp 5353/udp` (alternating comma, then space,
+then comma...), not `80/tcp, 1900/udp, 5353/udp`. Easy to miss since
+it "looks" correct and the first join happens to come out right.
+**Fix:** build the joined string in `awk` directly
+(`{if(o)o=o", "$1; else o=$1} END{print o}`) instead of piping to
+`paste` for any delimiter longer than one character.
+
+**Bug 2 — extracting one `nmap` NSE script's output block bled into
+the next script's block.** Two scripts' output sit back-to-back in
+`nmap`'s output with no blank line between them, both just
+`|`-prefixed continuation lines — stopping extraction only at the
+first *non*-`|` line means a block that reads "keep collecting `|`
+lines" doesn't know where one script's output ends and the next
+one's begins, and silently merges them. **Fix:** also stop at a new
+`| scriptname:` marker line, not just at the first non-`|` line —
+i.e. `f && /^\|[_ ]?[a-zA-Z0-9_-]+:/{exit}` *before* the generic
+`f && /^\|/{print; next}` continuation rule.

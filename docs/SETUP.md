@@ -298,13 +298,20 @@ session:
   happens to be a genuine, associated member of the *same* network
   being scanned (auto-detected by comparing `wlan0`'s current SSID to
   the selected one), the device-info screen additionally runs an ARP
-  scan plus, per selected device, active `nmap -O` OS fingerprinting
-  and `nbtscan` — this works regardless of the WiFi link's own
-  encryption, since being an authenticated LAN member doesn't depend on
-  decrypting the radio traffic at all. Exiting mid-scan or mid-deauth
-  (Ctrl+C, not just `q`/Back) is safe — an exit trap kills every
-  spawned `airodump-ng`/`aireplay-ng`/`nmap` child so nothing is left
-  running as an orphan.
+  scan plus, per selected device: active `nmap -O` OS-family
+  fingerprinting, `nbtscan`, and — for actual **model and version**
+  info, not just OS family — the `upnp-info` and `dns-service-discovery`
+  NSE scripts (both ship with `nmap` itself, nothing extra to install).
+  Many consumer/IoT devices actively broadcast their exact model this
+  way: a Chromecast's mDNS `_googlecast._tcp` record includes its
+  literal model string, and UPnP/SSDP device descriptions often include
+  `manufacturer`/`modelName`/`modelNumber`/`serialNumber` directly. All
+  of this works regardless of the WiFi link's own encryption, since
+  being an authenticated LAN member doesn't depend on decrypting the
+  radio traffic at all. Exiting mid-scan or mid-deauth (Ctrl+C, not
+  just `q`/Back) is safe — an exit trap kills every spawned
+  `airodump-ng`/`aireplay-ng`/`nmap` child so nothing is left running
+  as an orphan.
 - Write session notes into `pentest-logs/` as you go.
 
 ### Laptop-side shell aliases

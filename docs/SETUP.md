@@ -227,6 +227,8 @@ session:
 - `scripts/pentest/attack-menu.sh` (run on the Pi itself, `sudo` — aliased
   to `attack` in the Pi's own `~/.bashrc`) — interactive arrow-key menu:
   scan for nearby networks (2.4GHz + 5GHz, with a live progress gauge),
+  sorted strongest signal first and showing signal strength, name,
+  encryption, and band (not MAC/channel — not useful to look at here),
   pick one; scan for devices connected to it, each already labeled with
   a resolved device name or vendor right in the list; pick one; pick an
   attack (currently: continuous deauth); run it. Uses `whiptail` rather

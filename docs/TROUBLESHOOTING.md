@@ -566,3 +566,48 @@ investigation) and checking `ps` throughout — `airodump-ng` and
 `whiptail` both ran and rendered correctly with no `T`-state processes
 at any point, including at the natural end of the 10-second scan
 (previously the exact point it froze).
+
+---
+
+### 19. `attack-menu.sh`: long gap after the scan gauge closes, and menus clipped on the left
+
+**Symptom 1:** After the scan progress gauge reaches 100% and closes,
+there's a noticeable multi-second pause with nothing on screen before
+the network/device selection menu actually appears.
+
+**Root cause:** parsing the scan CSV forked `echo | xargs` (or
+`echo | tr`) up to four times per line just to trim whitespace off each
+field. A dense-neighborhood scan easily finds 100+ networks, and on the
+Pi Zero W's single slow ARM11 core, hundreds of forked subprocesses for
+nothing but string trimming took multiple seconds. Separately, resolving
+each device's MAC vendor called `awk` over the full ~215,000-line
+`ieee-data` OUI database **once per device** -- measured at ~4.3
+seconds *per call* on this board, so even a modest device list added
+tens of seconds on top.
+
+**Fix:**
+- Added a `trim()` helper using pure bash parameter expansion (no fork)
+  in place of every `echo | xargs`/`echo | tr` trim. Benchmarked on a
+  synthetic 150-network CSV: **20.1s -> 0.7s**.
+- Added `mac_vendors_bulk()`, which resolves every device's vendor in
+  **one** pass over the OUI database (a single `awk` invocation matching
+  a whole set of wanted prefixes) instead of one full-file scan per
+  device. Benchmarked with 30 synthetic MACs: correctly resolved known
+  vendors and left unknown ones empty, in ~2.6s total regardless of
+  device count -- previously would have been ~30 x 4.3s ≈ 129s.
+
+**Symptom 2:** The network-selection menu's title renders as "elect a
+WiFi network" -- the leading "S" is missing, cut off the left edge of
+the screen.
+
+**Root cause:** `whiptail --menu`/`--gauge`/`--msgbox` widths were
+hardcoded (78, 70, etc.). `whiptail` centers its dialog box on the
+terminal's actual column count; if the box is specified wider than the
+real terminal (a phone SSH client's terminal can easily be narrower than
+78 columns), the excess renders off the *left* edge -- clipped, not
+wrapped or shrunk.
+
+**Fix:** added `safe_w()`, which reads the real terminal width via
+`tput cols` and caps any requested dialog width to fit it (with a floor
+of 20 so a very narrow terminal still gets a usable, if cramped, dialog).
+Applied to every `whiptail` call in the script.

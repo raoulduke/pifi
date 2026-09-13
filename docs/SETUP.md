@@ -225,19 +225,42 @@ session:
 - `scripts/pentest/set-alfa-mode.sh monitor|managed` — flip the Alfa's mode
   without touching `wlan0`/SSH reachability.
 - `scripts/pentest/attack-menu.sh` (run on the Pi itself, `sudo` — aliased
-  to `attack` in the Pi's own `~/.bashrc`) — interactive arrow-key menu:
-  scan for nearby networks (2.4GHz + 5GHz, with a live progress gauge),
-  sorted strongest signal first and showing signal strength, name,
-  encryption, and band (not MAC/channel — not useful to look at here),
-  pick one; scan for devices connected to it, each already labeled with
-  a resolved device name or vendor right in the list; pick one; pick an
-  attack (currently: continuous deauth); run it. Uses `whiptail` rather
-  than `fzf` — see [TROUBLESHOOTING.md #16](TROUBLESHOOTING.md) for why.
-  Device identification is passive-only: MAC vendor and previously
-  probed SSIDs are always available (cleartext 802.11 management
-  frames), but a DHCP/mDNS/NetBIOS device name only resolves on an
-  *open* network — WPA/WPA2 encrypts data frames, and no attempt is
-  made to obtain or crack a passphrase to get past that.
+  to `attack` in the Pi's own `~/.bashrc`) — interactive arrow-key menu,
+  structured as three nested screens you can back out of at any level
+  without re-scanning:
+  1. **Networks**, from a scan (2.4GHz + 5GHz, live progress gauge)
+     sorted strongest signal first, showing signal strength, name,
+     encryption, and band (not MAC/channel — not useful to look at
+     here).
+  2. **Devices** connected to the picked network, from a second scan,
+     sorted strongest signal first and labeled with a resolved device
+     name/vendor plus signal strength (the one per-device factor that
+     affects whether an injected deauth frame reliably reaches it —
+     RF path loss is roughly symmetric). A `Back` entry returns to the
+     network list instantly, reusing the already-scanned results. If
+     the network is WPA3, a warning is shown here: WPA3 mandates
+     Protected Management Frames, which cryptographically authenticate
+     deauth frames — compliant clients ignore forged ones regardless of
+     signal, so deauth is unlikely to work at all against anything on
+     such a network (this is a network-wide fact, unlike signal
+     strength, so it's a warning rather than something to sort by).
+  3. **Device info**, once you pick a device: every discovered detail
+     (MAC, vendor, resolved name, signal, packet count, probed SSIDs),
+     plus `Send Deauth` and a `Back` to the device list. Deauth runs as
+     a plain full-screen view (this image's `whiptail` 0.52.25 has no
+     `--timeout` flag, so a dialog can't both auto-refresh and take a
+     button press) redrawn every second with elapsed time and a
+     best-effort "still active / likely dropped" status, based on
+     whether the device keeps appearing in a live concurrent capture —
+     not a guaranteed disconnect signal. `q` + Enter stops it.
+
+  Uses `whiptail` rather than `fzf` — see
+  [TROUBLESHOOTING.md #16](TROUBLESHOOTING.md) for why. Device
+  identification is passive-only: MAC vendor and previously probed
+  SSIDs are always available (cleartext 802.11 management frames), but
+  a DHCP/mDNS/NetBIOS device name only resolves on an *open* network —
+  WPA/WPA2 encrypts data frames, and no attempt is made to obtain or
+  crack a passphrase to get past that.
 - Write session notes into `pentest-logs/` as you go.
 
 ### Laptop-side shell aliases

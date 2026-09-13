@@ -611,3 +611,29 @@ wrapped or shrunk.
 `tput cols` and caps any requested dialog width to fit it (with a floor
 of 20 so a very narrow terminal still gets a usable, if cramped, dialog).
 Applied to every `whiptail` call in the script.
+
+---
+
+### 20. No way to build a live-updating `whiptail` dialog with a Cancel button
+
+**Symptom while building the deauth screen:** wanted a dialog showing
+elapsed time and a live status, refreshing on its own every second,
+while still letting a keypress cancel it at any point -- the natural
+way to do that with `whiptail`/`dialog` is a `--timeout` flag that
+returns the dialog automatically if no key is pressed within N seconds,
+so it can be redrawn in a loop.
+
+**Root cause:** this image's `whiptail` is 0.52.25 (the `newt`-based
+build, confirmed via `whiptail --help`), which has no `--timeout`
+option at all -- that flag exists in `dialog` and in some other
+`whiptail` builds, but not this one. Without it, any `whiptail` call
+blocks indefinitely waiting for a keypress; there's no way to have it
+return on its own to redraw updated content.
+
+**Fix:** don't fight the missing flag -- the deauth status view
+(`run_deauth()` in `attack-menu.sh`) uses a plain full-screen loop
+instead of a `whiptail` dialog: `clear` + `echo` the current elapsed
+time/status each second, and `read -r -t 1 key` (a real bash builtin
+with its own timeout) to both wait ~1s AND check for a `q` keypress in
+the same step. Simpler and more reliable here than depending on a flag
+this particular build doesn't have.

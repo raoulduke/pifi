@@ -203,6 +203,40 @@ uses only Termux's own package repo.
    `06-enable-alfa-monitor-boot.sh` was run during setup — see below),
    write notes into `pentest-logs/`.
 
+### Taking pi-tail somewhere else entirely (no laptop, no home network)
+
+Nothing about phone-only operation is tied to being at home — the Pi
+joining the phone's hotspot is a plain WiFi association (SSID +
+password + in range), independent of physical location. Before relying
+on this away from home, where there's no laptop to fall back on for
+troubleshooting:
+
+1. **Confirm the Pi actually has a saved profile for the hotspot
+   you'll use.** Check `id_str="mobile-1"`/`"mobile-2"` entries in
+   `/etc/wpa_supplicant/wpa_supplicant.conf` on the Pi against the
+   phone's *current* hotspot SSID (Settings → Network & internet →
+   Hotspot & tethering → WiFi hotspot) — Android doesn't normally
+   regenerate a hotspot's name/password on its own, but confirm rather
+   than assume, since there's no way to add a new profile remotely if
+   it's changed. A `home` profile (lower priority, for a saved home
+   WiFi network) doesn't help away from home — it simply won't be in
+   range, which is fine, not a fallback risk.
+2. **The hotspot doesn't need internet access.** If the phone has no
+   mobile data to share, the hotspot still works fine as a plain local
+   access point for SSH — the Pi doesn't need internet for that, only
+   for things like NTP time sync (see
+   [TROUBLESHOOTING.md #7](TROUBLESHOOTING.md)).
+3. **Do a live end-to-end test before you're out of reach of the
+   hardware**, not just before you leave the house: turn the phone's
+   hotspot on, power-cycle the Pi, wait ~1-2 minutes for it to fully
+   boot and associate, then run `pi` in Termux and confirm it actually
+   connects. This is the one check that catches a real problem while
+   it's still fixable, instead of at the remote location.
+4. `pi`'s IP cache (`~/.cache/pi_last_ip`) will hold whatever address
+   worked last, which won't match a new location's subnet — that's
+   fine, it just falls through to the normal full scan after a quick
+   failed check, costing a couple of extra seconds, not a failure.
+
 ## 6. Day to day (laptop-assisted alternative)
 
 If you do have a laptop on the same hotspot and prefer it for a given

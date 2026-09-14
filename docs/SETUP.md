@@ -151,6 +151,9 @@ relying on it somewhere without a laptop to fall back on:
   (private repo).
 - `scripts/pentest/set-alfa-mode.sh monitor|managed` — flip the Alfa's
   mode without touching `wlan0`/SSH reachability.
+- `scripts/pentest/update-oui-master.sh` — refreshes `pifite`'s
+  third-tier OUI vendor database (run on the Pi, needs `sudo`; safe to
+  skip, or add to a monthly cron — see the script).
 - `scripts/pentest/pifite.py` — the interactive pentest TUI, run on the
   Pi as `pifite` (aliased to `sudo python3 -B ~/pifi/scripts/pentest/pifite.py`,
   passwordless via `/etc/sudoers.d/pifite-nopasswd`). See below.
@@ -176,12 +179,24 @@ A banner main menu, arrow keys or number keys to select:
 
 Device identification is passive by default (MAC vendor, probed SSIDs
 always available; a DHCP/mDNS/NetBIOS name only resolves on an *open*
-network). Vendor names that are really chip/platform suppliers rather
-than a device brand (Espressif, Tuya) get an `(IoT device)` hint;
-Vantiva (a real router/gateway OEM) gets `(router/gateway)`. A DHCP
-fingerprint (Option 55/60) gives a best-effort **OS family** guess —
-Windows/Android/iOS/Linux — from well-corroborated public signatures
-only; this is not the same as a specific model/version (see
+network). MAC vendor lookup checks three independent OUI sources in
+turn (`ieee-data`, `nmap`'s bundled prefixes, and — if
+[`scripts/pentest/update-oui-master.sh`](../scripts/pentest/update-oui-master.sh)
+has been run — a third, community-maintained database), then falls
+back to detecting a locally-administered/randomized MAC (common on
+modern iPhones/Android phones for privacy) and labels it as such
+explicitly rather than an ambiguous "unknown vendor" — no OUI
+database can ever resolve an address like that, since it was never a
+real vendor-assigned one. Vendor names that are really chip/platform
+suppliers rather than a device brand (Espressif, Tuya) get an `(IoT
+Device)` hint; Vantiva (a real router OEM) gets `(Router)`. A resolved
+name gets the vendor's brand prefixed if it isn't already there (mDNS's
+"Hue Bridge - 05AB3A" → "Philips Hue Bridge - 05AB3A"), plus a model
+number when the device's own mDNS TXT record advertises one (confirmed
+on real hardware: Hue's `modelid=BSB002`). A DHCP fingerprint (Option
+55/60) gives a best-effort **OS family** guess — Windows/Android/iOS/
+Linux — from well-corroborated public signatures only; this is not the
+same as a specific model/version (see
 [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for why that needs either
 full router-level visibility or a crowdsourced fingerprint service
 neither of which this tool has). Being on the same network as the

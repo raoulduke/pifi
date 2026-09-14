@@ -863,3 +863,27 @@ was hardcoded:**
 already extracts DHCP hostnames (`_tshark_hostnames_from_pcap()`) --
 Option 55/60/12 are all read from one packet in one pass, not a
 separate capture or extra decode cost, per #26's lesson above.
+
+---
+
+### 28. A locally-administered MAC will never resolve in any OUI database -- confirmed, not assumed
+
+**Symptom:** a real device on the network (confirmed: an iPhone and, separately, an Android phone) always showed as "unknown vendor," across every OUI source tried.
+
+**Root cause, confirmed rather than assumed:** the MAC's first octet has the IEEE-reserved "locally administered" bit set (the second-least-significant bit) -- `arp-scan`'s own output independently confirms the same read (`Unknown: locally administered`). This is iOS/Android's per-network MAC randomization (Private Wi-Fi Address on iOS, since Android 10 on Android) deliberately marking the address as not a real vendor-assigned one. **No OUI database, however complete or frequently updated, can ever resolve an address like this** -- it isn't a data-completeness gap, the address structurally was never tied to a real hardware vendor in the first place.
+
+**Fix:** `is_locally_administered_mac()` checks this bit directly and labels the result "randomized/private MAC (not a real vendor address)" instead of the ambiguous "unknown vendor" (which doesn't distinguish "not in our database yet" from "structurally unresolvable").
+
+**Investigated and did not pan out -- recorded so it isn't re-attempted:** whether a device's 802.11 vendor-specific information elements (in probe requests, which are cleartext management frames regardless of the target network's own encryption) might reveal a real vendor OUI even when the frame's source MAC is randomized -- plausible in principle, and part of what the 2017 FuriousMAC paper describes for defeating early Android randomization implementations. Tested directly against a live capture of real client probe requests on this network: no vendor-specific IEs or WPS manufacturer/model/device-name fields were present in any of them -- consistent with the 2021 FuriousMAC follow-up paper's own finding that current devices leak less this way than older ones did. Not implemented; nothing to extract on real, current hardware.
+
+---
+
+### 29. Added a third OUI vendor-lookup source, and why it's a real (if modest) improvement
+
+**Requested:** check whether `Ringmast4r/OUI-Master-Database` (a community-maintained, MIT-licensed, monthly-updated aggregate OUI database) would resolve more vendors than the two sources already in use.
+
+**Investigated directly rather than assumed:** fetched the repo and its actual data file. It merges IEEE + nmap-mac-prefixes (both already used directly, see `mac_vendors_bulk()`) with two sources neither of those draws from -- Wireshark's own manufacturer database and HDM Mac-Tracker -- so it can resolve some real vendor OUIs the existing two-source setup misses. It does **not** include any per-model MAC-block mapping (confirmed no such thing exists in the repo), and -- per #28 above -- cannot help at all for a locally-administered/randomized MAC, since no OUI database structurally can.
+
+**A real parsing pitfall caught before shipping it:** the file is CSV with a quoted `address` field containing embedded commas (`"7760 France Ave S Suite 340 Bloomington MN US 55438"`). The existing two sources' lookups use `awk` with a plain field split, which is fine for their simpler formats but would silently misparse this file's columns. Used Python's `csv` module for this third source specifically instead of forcing it through the same `awk` pattern.
+
+**Fix:** `scripts/pentest/update-oui-master.sh` downloads/refreshes the file to `/usr/local/share/pifi/oui-master.csv` (run manually, or add to a monthly cron matching the upstream repo's own update cadence); `mac_vendors_bulk()` checks it as a third-tier fallback, only if the file exists -- skipping the download entirely leaves the tool exactly as it was, no regression risk.

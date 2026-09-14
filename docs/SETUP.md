@@ -308,8 +308,10 @@ session:
   `manufacturer`/`modelName`/`modelNumber`/`serialNumber` directly. All
   of this works regardless of the WiFi link's own encryption, since
   being an authenticated LAN member doesn't depend on decrypting the
-  radio traffic at all. Exiting mid-scan or mid-deauth (Ctrl+C, not
-  just `q`/Back) is safe — an exit trap kills every spawned
+  radio traffic at all. Ctrl+C works from *any* screen (network/device
+  menus, scan gauges, device-info, or the live deauth view — not just
+  `q`/Back on that last one) and always stops the whole script rather
+  than just backing out one level; an exit trap kills every spawned
   `airodump-ng`/`aireplay-ng`/`nmap` child so nothing is left running
   as an orphan.
 - Write session notes into `pentest-logs/` as you go.

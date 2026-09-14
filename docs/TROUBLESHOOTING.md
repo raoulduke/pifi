@@ -670,3 +670,38 @@ one's begins, and silently merges them. **Fix:** also stop at a new
 `| scriptname:` marker line, not just at the first non-`|` line —
 i.e. `f && /^\|[_ ]?[a-zA-Z0-9_-]+:/{exit}` *before* the generic
 `f && /^\|/{print; next}` continuation rule.
+
+### 22. `attack-menu.sh`: Ctrl+C only stopped the script from some screens
+
+**Symptom:** Ctrl+C during the live deauth status view stopped
+everything as documented, but hitting it on a network/device menu, a
+scan gauge, or the device-info screen instead just backed out one
+level (like pressing Back/Cancel) or did nothing visible, leaving the
+script running.
+
+**Cause:** `set -m` job control (needed elsewhere so `airodump-ng`'s
+terminal ioctls don't get `SIGTTOU`-stopped, see #18) means every
+foreground `whiptail` dialog or gauge runs in its *own* process group
+and briefly owns the terminal's foreground control. Ctrl+C (`SIGINT`)
+is delivered to *that* process group, not to `attack-menu.sh`'s own
+process — the script only learns anything happened via the dialog's
+exit code afterward. The live deauth view was the one screen immune
+to this: its polling loop uses bash's own `read` builtin, which doesn't
+fork a new process group, so the script's own process (with no `INT`
+trap, hence bash's default terminate-on-SIGINT) receives the signal
+directly and dies — triggering the `EXIT` trap's cleanup normally.
+Every other screen's `whiptail` call was only ever checked with a bare
+`||`, which can't distinguish "killed by Ctrl+C" (exit 128+signal,
+130 for `SIGINT`) from an ordinary Cancel/Esc button (1/255) — both
+fell into the same "go back" branch.
+
+**Fix:** added `is_interrupted()` (checks for an exit code `>= 128`)
+and call it after every `whiptail` invocation and after the scan
+gauge's own pipeline (`PIPESTATUS[1]`, since the gauge's exit code is
+otherwise never inspected at all) — an interrupted one now kills any
+still-running background scan and `exit`s the whole script instead of
+falling through to Back/Cancel handling. Also moved `run_deauth()`'s
+per-session scratch dir (`monwork`) into a global (`MONWORK`) so the
+top-level `EXIT` trap can remove it even when Ctrl+C terminates the
+script straight out of the deauth loop, skipping that function's own
+post-loop `rm -rf` entirely.

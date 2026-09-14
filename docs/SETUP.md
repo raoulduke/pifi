@@ -1,27 +1,21 @@
 # Setup
 
-Step-by-step to recreate this exact working setup on a new Pi Zero W. For
-*why* each step exists, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md) — this
-doc is the "what to do," that one is the "why it's necessary."
+Step-by-step to recreate this setup on a new Pi Zero W. For the *why*
+behind each step, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
 ## 1. Flash and boot
 
 1. Download the Kali pi-tail image:
    **https://old.kali.org/arm-images/kali-2025.2/kali-linux-2025.2-raspberry-pi-zero-w-pitail-armel.img.xz**
-
-   This is **not** on the current kali.org downloads page — pi-tail builds
-   live on the `old.kali.org` ARM images mirror. If 2025.2 is no longer the
-   current release, browse
-   `https://old.kali.org/arm-images/` for the equivalent
-   `-raspberry-pi-zero-w-pitail-armel.img.xz` under whatever version
-   directory exists, using the same filename pattern.
-2. Flash it to a microSD card (Raspberry Pi Imager's "Use custom image," or
-   `dd`/Etcher directly onto the `.img` after decompressing the `.xz`).
-3. Boot the Pi with just power connected (no hub/Alfa yet) and get it on
-   your WiFi hotspot far enough to SSH in:
-   - SSH: `kali` / `kali`
-   - The onboard chip is `wlan0` — this stays as the control-plane link for
-     the entire life of this setup.
+   — not on the current kali.org downloads page; pi-tail builds live on
+   the `old.kali.org` ARM images mirror. If 2025.2 is no longer current,
+   browse `https://old.kali.org/arm-images/` for the equivalent filename
+   under whatever version directory exists.
+2. Flash it to a microSD card (Raspberry Pi Imager's "Use custom image,"
+   or `dd`/Etcher after decompressing the `.xz`).
+3. Boot with just power connected (no hub/Alfa yet) and get it on your
+   WiFi hotspot far enough to SSH in as `kali`/`kali`. The onboard chip
+   (`wlan0`) stays the control-plane link for the life of this setup.
 
 ## 2. Copy this repo onto the Pi and run setup
 
@@ -31,55 +25,37 @@ cd pifi/scripts/setup
 sudo ./install.sh
 ```
 
-This runs, in order:
-1. `01-fix-network-routing.sh` — removes the stale `usb0` default route
-   that otherwise breaks internet access on every boot. Fixes
-   `/boot/firmware/interfaces` (the actual persistent source on this
-   image — **not** `/etc/network/interfaces`, which gets silently
-   overwritten from the boot partition on every boot; see
-   [TROUBLESHOOTING.md #6](TROUBLESHOOTING.md)) and syncs it live.
-2. `02-fix-clock.sh` — forces an NTP resync (the Pi Zero W has no RTC and
-   can drift wildly without internet access to correct it, which breaks
-   TLS).
-3. `05-enable-mdns.sh` — turns on `avahi-daemon` (installed but inactive
-   by default on this image) so the Pi is reachable at
-   `pitail.local` instead of needing to look up
-   its current IP every time. Matters most for
-   [phone-only operation](#5-phone-only-operation-as-pi-tail-intends).
-4. `03-install-rtl8812au-driver.sh` — builds and installs the Alfa's
-   driver via DKMS. **Budget 2-4 hours** for this on a Pi Zero W's single
-   core. It runs detached, so you can disconnect and check back later —
-   see the script's own output for how to check progress.
+Runs, in order:
 
-Once the driver build finishes (`sudo dkms status` shows `installed`) **and
-the Alfa is physically connected** (step 3, below — do that first if you
-haven't), run the remaining step separately. `install.sh` doesn't wait
-around for the multi-hour build or for you to plug in hardware, so this
-has to be a manual follow-up:
+1. `01-fix-network-routing.sh` — removes a stale default route that
+   otherwise breaks internet access on every boot.
+2. `02-fix-clock.sh` — forces an NTP resync (no RTC on this board).
+3. `05-enable-mdns.sh` — enables `avahi-daemon` so the Pi is reachable
+   at `pitail.local`.
+4. `03-install-rtl8812au-driver.sh` — builds and installs the Alfa's
+   driver via DKMS. **Budget 2-4 hours** on a Pi Zero W's single core.
+   Runs detached — disconnect and check back later.
+
+Once the driver build finishes (`sudo dkms status` shows `installed`)
+**and the Alfa is physically connected** (step 3 below), run the rest
+manually — `install.sh` doesn't wait for either:
+
 ```
 sudo scripts/setup/04-pin-interface-names.sh
 sudo scripts/setup/06-enable-alfa-monitor-boot.sh
 sudo reboot
 ```
-5. `04-pin-interface-names.sh` — pins `wlan0`/`wlan1` to fixed names by MAC
-   address. Without this, which physical adapter ends up named `wlan0` vs
-   `wlan1` is a boot-time race that can silently disconnect the intended
-   control-plane interface — see
-   [TROUBLESHOOTING.md #11](TROUBLESHOOTING.md). **Reboot after running
-   this** to confirm it actually took effect; don't just trust that it
-   silently worked.
-6. `06-enable-alfa-monitor-boot.sh` — a systemd service that puts `wlan1`
-   into monitor mode automatically on every boot, bound to the `wlan1`
-   device unit (which only reliably means the Alfa because of step 5's
-   naming pin). Without this, monitor mode does not persist across
-   reboots — `wlan1` comes back up in plain `managed` mode every time, and
-   you'd need `sudo scripts/pentest/set-alfa-mode.sh monitor` manually
-   before every session.
+
+5. `04-pin-interface-names.sh` — pins `wlan0`/`wlan1` to fixed names by
+   MAC address, so which physical adapter gets which name no longer
+   depends on boot-time enumeration order. **Reboot after running this.**
+6. `06-enable-alfa-monitor-boot.sh` — puts `wlan1` into monitor mode
+   automatically on every boot.
 
 ## 3. Assemble the USB hardware chain
 
-With the Pi still powered from step 1/2, connect (see
-[HARDWARE.md](HARDWARE.md) for the exact connector types):
+With the Pi still powered, connect (see [HARDWARE.md](HARDWARE.md) for
+exact connector types):
 
 ```
 Pi (Micro-USB data port)
@@ -91,328 +67,118 @@ Pi (Micro-USB data port)
   → Alfa AWUS036ACH
 ```
 
-USB hotplug is safe while the Pi is running — no need to power-cycle the Pi
-for this step.
+USB hotplug is safe while the Pi is running.
 
 ## 4. Verify
 
 ```
-lsusb                      # should show the hub (Realtek RTS5411) and the
-                            # Alfa (0bda:8812)
-lsmod | grep 88XXau        # driver loaded
-iw dev                      # wlan0 (managed, onboard) + wlan1 (Alfa)
-iw dev wlan1 info          # if 06-enable-alfa-monitor-boot.sh has been run
-                            # and the Pi rebooted since, this already shows
-                            # "type monitor" with no manual step needed
+lsusb                 # hub (Realtek RTS5411) + Alfa (0bda:8812)
+lsmod | grep 88XXau   # driver loaded
+iw dev                 # wlan0 (managed, onboard) + wlan1 (Alfa)
+iw dev wlan1 info     # "type monitor" if step 2's setup already ran + rebooted
 ```
-If `wlan1` isn't already in monitor mode (e.g. you haven't run
-`06-enable-alfa-monitor-boot.sh`/rebooted yet), set it manually:
+
+If `wlan1` isn't in monitor mode yet, set it manually:
+
 ```
 sudo scripts/pentest/set-alfa-mode.sh monitor
-iw dev wlan1 info          # confirms "type monitor"
 ```
 
-If `wlan1` doesn't appear at all after the driver install finishes, reboot
-once — the USB modalias-based auto-load sometimes needs a fresh device
-enumeration to trigger.
+If `wlan1` doesn't appear at all after the driver install finishes,
+reboot once.
 
-**Double-check which physical adapter got which name** — don't just check
-that `wlan0` and `wlan1` both exist, check that `wlan0`'s MAC is the
-onboard chip's and it's actually associated to your hotspot:
+**Confirm `wlan0` is actually the onboard chip**, not just that both
+interfaces exist:
+
 ```
-iw dev wlan0 info    # should show "ssid <your hotspot>", not the Alfa's MAC
+iw dev wlan0 info    # should show your hotspot's SSID, not the Alfa's MAC
 ```
-If this doesn't match, `04-pin-interface-names.sh` either wasn't run or
-didn't take effect yet (needs a reboot after running) — see
-[TROUBLESHOOTING.md #11](TROUBLESHOOTING.md).
+
+If it doesn't, `04-pin-interface-names.sh` either wasn't run or needs a
+reboot to take effect.
 
 ## 5. Phone-only operation (as pi-tail intends)
 
-The whole point of pi-tail is not needing a laptop — the device's own
-bundled README says as much: *"Install your favourite ssh and vnc client
-on your smartphone."* This is the primary intended way to run it day to
-day. Below is the actual working setup on a Pixel 3 with **no Google Play
-Store access** (Termux installed via F-Droid/sideload) — everything here
-uses only Termux's own package repo.
+No laptop needed day to day — SSH in from a phone SSH client. Below is
+the working setup on Android/Termux (F-Droid, no Play Store).
 
-1. Turn on the Pixel 3's hotspot. The Pi auto-connects to it (already
-   configured via the `mobile-1`/`mobile-2` WiFi profiles).
-2. In Termux, get a real SSH client and `nmap` (both from Termux's own
-   repo, nothing Play-Store-related):
+1. Turn on the phone's hotspot — the Pi auto-connects to it (saved
+   `mobile-1`/`mobile-2` WiFi profiles).
+2. In Termux: `pkg install openssh nmap`. If that fails with "No mirror
+   or mirror group selected," run `termux-change-repo` and pick a
+   regional mirror.
+3. `.local` (mDNS) resolution doesn't work from Termux's `ssh` — find
+   the Pi by IP instead:
    ```
-   pkg install openssh nmap
+   ip addr show wlan1   # wlan1 is the hotspot's own AP interface on this phone
+   nmap -p22 --open <that-subnet>/24
    ```
-   If `pkg update`/`install` fails with **"No mirror or mirror group
-   selected"**, run `termux-change-repo`, pick a mirror group, then a
-   region close to you (not "All" — regional mirrors are more reliable),
-   and retry.
-3. **`.local` (mDNS) hostname resolution does not work from Termux's
-   command-line `ssh`**, even though it works fine from Windows/macOS —
-   Android's underlying C library doesn't do mDNS resolution for plain
-   POSIX tools the way desktop OSes do. Don't rely on
-   `ssh kali@pitail.local` working here. Find the Pi by IP instead:
-   ```
-   ip addr show wlan1
-   ```
-   (**not** `wlan0` — on this phone, `wlan0` is the *regular* WiFi client
-   connection, e.g. to home WiFi; `wlan1` is the hotspot's own AP
-   interface. This can vary by phone/Android version — check both if
-   unsure.) Note the IP shown (e.g. `192.168.3.130`), then scan that
-   `/24` specifically for the SSH port, which isolates the Pi
-   unambiguously without needing MAC visibility (unprivileged Termux
-   can't do ARP-level MAC discovery anyway):
-   ```
-   nmap -p22 --open 192.168.3.0/24
-   ```
-4. Connect:
-   ```
-   ssh kali@<ip-found-above>
-   ```
-   password `kali`.
-5. **Set up SSH keys once, so it never prompts for a password again:**
-   ```
-   ssh-keygen -t ed25519
-   ssh-copy-id kali@<ip>
-   ```
-6. **Make future connects one command**, immune to the hotspot's subnet
-   changing (observed to happen between sessions), *and* to the Pi
-   itself falling back to a saved home-WiFi profile instead of the
-   hotspot (see [TROUBLESHOOTING.md #15](TROUBLESHOOTING.md)): add
-   [`scripts/pentest/termux-bashrc-snippet.sh`](../scripts/pentest/termux-bashrc-snippet.sh)'s
-   contents to `~/.bashrc` in Termux (create the file if it doesn't
-   already exist — `cat >> ~/.bashrc` works either way), then
-   `source ~/.bashrc`. From then on, just run:
-   ```
-   pi
-   ```
-   and it finds and connects to the Pi automatically — it tries both
-   `wlan0` (regular WiFi client) and `wlan1` (hotspot AP), scanning
-   whichever one actually has an address, so it works whether the Pi is
-   on the phone's own hotspot or has fallen back to home WiFi. If a
-   given Android/Termux version blocks `ip addr` on an interface with a
-   netlink permission error, it says so explicitly rather than
-   misreporting that interface as simply "not up." It also remembers
-   the last IP the Pi was actually found at
-   (`~/.cache/pi_last_ip` in Termux) and tries a plain, near-instant TCP
-   connect to it first — the common case is the Pi hasn't actually
-   moved, so this skips the multi-second subnet scan entirely most of
-   the time, only falling back to the full scan when that quick check
-   fails.
-7. From there, the workflow is identical to the laptop path (below) — run
-   your tools on `wlan1` (already in monitor mode automatically if
-   `06-enable-alfa-monitor-boot.sh` was run during setup — see below),
-   write notes into `pentest-logs/`.
+4. Connect: `ssh kali@<ip>` (password `kali`).
+5. Set up SSH keys once: `ssh-keygen -t ed25519 && ssh-copy-id kali@<ip>`.
+6. Add [`scripts/pentest/termux-bashrc-snippet.sh`](../scripts/pentest/termux-bashrc-snippet.sh)'s
+   contents to `~/.bashrc` in Termux, then `source ~/.bashrc`. From then
+   on, just run `pi` — it finds and connects to the Pi automatically,
+   whether it's on the phone's hotspot or has fallen back to a saved
+   home-WiFi profile (see [TROUBLESHOOTING.md #15](TROUBLESHOOTING.md)).
+7. From there, run tools on `wlan1` and write notes into `pentest-logs/`.
 
-### Taking pi-tail somewhere else entirely (no laptop, no home network)
+### Taking it away from home
 
-Nothing about phone-only operation is tied to being at home — the Pi
-joining the phone's hotspot is a plain WiFi association (SSID +
-password + in range), independent of physical location. Before relying
-on this away from home, where there's no laptop to fall back on for
-troubleshooting:
+Nothing about phone-only operation is tied to being at home. Before
+relying on it somewhere without a laptop to fall back on:
 
-1. **Confirm the Pi actually has a saved profile for the hotspot
-   you'll use.** Check `id_str="mobile-1"`/`"mobile-2"` entries in
-   `/etc/wpa_supplicant/wpa_supplicant.conf` on the Pi against the
-   phone's *current* hotspot SSID (Settings → Network & internet →
-   Hotspot & tethering → WiFi hotspot) — Android doesn't normally
-   regenerate a hotspot's name/password on its own, but confirm rather
-   than assume, since there's no way to add a new profile remotely if
-   it's changed. A `home` profile (lower priority, for a saved home
-   WiFi network) doesn't help away from home — it simply won't be in
-   range, which is fine, not a fallback risk.
-2. **The hotspot doesn't need internet access.** If the phone has no
-   mobile data to share, the hotspot still works fine as a plain local
-   access point for SSH — the Pi doesn't need internet for that, only
-   for things like NTP time sync (see
-   [TROUBLESHOOTING.md #7](TROUBLESHOOTING.md)).
-3. **Do a live end-to-end test before you're out of reach of the
-   hardware**, not just before you leave the house: turn the phone's
-   hotspot on, power-cycle the Pi, wait ~1-2 minutes for it to fully
-   boot and associate, then run `pi` in Termux and confirm it actually
-   connects. This is the one check that catches a real problem while
-   it's still fixable, instead of at the remote location.
-4. `pi`'s IP cache (`~/.cache/pi_last_ip`) will hold whatever address
-   worked last, which won't match a new location's subnet — that's
-   fine, it just falls through to the normal full scan after a quick
-   failed check, costing a couple of extra seconds, not a failure.
+- Confirm the Pi has a saved profile for the hotspot you'll use
+  (`/etc/wpa_supplicant/wpa_supplicant.conf` on the Pi vs. the phone's
+  current hotspot SSID).
+- The hotspot doesn't need internet access — only NTP time sync does.
+- Do a live end-to-end test (power-cycle the Pi, confirm `pi` connects)
+  before you're out of reach of the hardware.
 
 ## 6. Day to day (laptop-assisted alternative)
 
-If you do have a laptop on the same hotspot and prefer it for a given
-session:
-
-- `scripts/pentest/find-pi.sh` — finds and connects to the Pi regardless
-  of which network it's currently on. Sweeps **every** active network
-  interface on the laptop (not just one assumed subnet — this laptop can
-  have several active at once: its own WiFi client connection, a hosted
-  Windows Mobile Hotspot's virtual AP, VirtualBox/VPN adapters, etc.),
-  matching on the onboard chip's fixed MAC address rather than any
-  particular IP — reliable even when the Pi has fallen back to a
-  completely different saved WiFi profile (e.g. `home`) than the one you
-  expected. Reports which network it actually found it on, updates the
-  `pifi` SSH alias (`~/.ssh/config`) to the current address automatically,
-  and connects. Run from the laptop/WSL side (needs `powershell.exe`, i.e.
-  WSL2 on Windows — plain WSL/Linux networking can't see the Windows
-  host's other interfaces). Add `--no-connect` to just locate it and
-  update the alias without opening a session.
-- `scripts/pentest/set-alfa-mode.sh monitor|managed` — flip the Alfa's mode
-  without touching `wlan0`/SSH reachability.
-- `scripts/pentest/pifite.py` — a persistent curses TUI, run on the Pi
-  itself as `pifite` (a `~/.bash_aliases` entry for
-  `sudo python3 -B ~/pifi/scripts/pentest/pifite.py`, matched exactly —
-  `-B` included, since sudoers matches the whole command line literally
-  — by a `NOPASSWD` entry in `/etc/sudoers.d/pifite-nopasswd`, so it
-  never prompts for a password). `-B` stops Python writing a
-  `__pycache__/*.pyc`: running as root, that cache would otherwise be
-  root-owned inside an otherwise `kali`-owned checkout, breaking
-  `rsync`/`git`/`rm` for anything non-root afterward.
-
-  Opens on a banner main menu, just a numbered name per item (`1)
-  Network discovery`, `2) Deauth attack`) — arrow keys move, Enter
-  selects, and so does typing a row's own number directly (a
-  single-digit menu like this one selects the instant you press the
-  digit; a longer numbered list, like the network/device lists below,
-  briefly buffers a multi-digit number so `14` doesn't jump to row `1`
-  the moment you type the first digit).
-  1. **Network discovery** — scans (2.4GHz + 5GHz) and shows results
-     live, as they're actually found, sorted strongest signal first
-     (signal, name, encryption, band) with a real countdown to when
-     the scan ends — not a static duration or percent bar. Press `s`
-     to save the list to disk — an attack picks from that saved list
-     instead of scanning itself, so re-running discovery and saving
-     again is how you refresh it. Esc discards the scan and returns to
-     the main menu without saving. The saved list is removed
-     automatically when `pifite` exits (normally, Ctrl+C, or `kill`) —
-     a fresh run always starts with nothing saved.
-  2. **Deauth attack** (more attacks can be added the same way later)
-     — picks a network from the saved list (prompts to run discovery
-     first if nothing's saved yet), then scans that network for
-     connected devices, again shown live by MAC/signal as they're
-     found. When on the same network as `wlan0`, this scan runs
-     several things concurrently (see below), each shown as its own
-     step with its own status — a real countdown for anything with a
-     known ceiling, `done` the instant that step's own process
-     actually exits (not just a clock guess), or `skipped` if it
-     doesn't apply this run:
-     ```
-     Steps:
-       [ 12s left]  Passive device scan (airodump)
-       [     done]  ARP scan (arp-scan)
-       [  6s left]  Ping sweep (nmap -sn)
-       [     done]  NetBIOS scan (nbtscan)
-       [  9s left]  wlan0 name capture (mDNS/DHCP/NetBIOS)
-     ```
-     Once the scan ends, vendor/name resolution runs (shown as one
-     more brief step) and the enriched, fully-labeled device list
-     appears (signal, IP, resolved name/vendor — see below for how).
-     Picking a device shows every discovered detail (MAC, vendor,
-     resolved name, signal, packet count, probed SSIDs) with a `Send
-     Deauth` action. If the network is WPA3, a warning is shown: WPA3
-     mandates Protected Management Frames, which cryptographically
-     authenticate deauth frames, so compliant clients ignore forged
-     ones regardless of signal — deauth is unlikely to work at all
-     against anything on such a network. Deauth itself runs as a live
-     view, redrawn every second with elapsed time and a best-effort
-     "still active / likely dropped" status based on whether the
-     device keeps appearing in a concurrent capture — not a guaranteed
-     disconnect signal. `q` or Ctrl+C stops it and returns to the
-     device list.
-
-  Every screen supports Ctrl+C (a real `SIGINT`, since curses leaves
-  the terminal's interrupt character alone) as well as Esc/`q` to back
-  out one level; either way, an exit path kills every spawned
-  `airodump-ng`/`aireplay-ng`/`nmap` child so nothing's left running as
-  an orphan.
-
-  Device identification is passive-only by default: MAC vendor and
-  previously probed SSIDs are always available (cleartext 802.11
-  management frames), but a DHCP/mDNS/NetBIOS device name only
-  resolves on an *open* network — WPA/WPA2 encrypts data frames, and no
-  attempt is made to obtain or crack a passphrase to get past that.
-  Passive capture alone only catches a device if it happens to
-  transmit during the scan window — an idle device is invisible to it
-  regardless of how long that window is. If `wlan0` happens to be a
-  genuine, associated member of the *same* network being scanned
-  (auto-detected by comparing `wlan0`'s current SSID to the selected
-  one), an ARP scan plus `nmap -sn` fill that gap: any device either
-  finds that the passive capture missed is added to the list too (just
-  without a signal-strength reading, since airodump never saw it).
-  Being on the same network additionally unlocks, per selected device:
-  active `nmap -O` OS-family fingerprinting, `nbtscan`, and — for
-  actual **model and version** info, not just OS family — the
-  `upnp-info` and `dns-service-discovery` NSE scripts (both ship with
-  `nmap` itself, nothing extra to install). Many consumer/IoT devices
-  actively broadcast their exact model this way: a Chromecast's mDNS
-  `_googlecast._tcp` record includes its literal model string, and
-  UPnP/SSDP device descriptions often include
-  `manufacturer`/`modelName`/`modelNumber`/`serialNumber` directly. All
-  of this works regardless of the WiFi link's own encryption, since
-  being an authenticated LAN member doesn't depend on decrypting the
-  radio traffic at all. A vendor name that's actually a chip/platform
-  supplier rather than a device brand (`Espressif Inc.`, `Tuya Smart
-  Inc.`) is annotated with the device category that usually means
-  (`(IoT/smart-home device)`, `(smart-home IoT)`) — a real device OEM
-  like `Vantiva USA LLC` (routers/gateways/set-top boxes) gets a more
-  specific hint (`(router/gateway)`) since that vendor string is a much
-  stronger signal than a chip supplier embedded in thousands of
-  unrelated white-label products.
+- `scripts/pentest/find-pi.sh` — finds the Pi regardless of which
+  network it's on (sweeps every active laptop interface, matches by the
+  onboard chip's MAC), updates the `pifi` SSH alias in `~/.ssh/config`,
+  and connects. Run from WSL2 on Windows (needs `powershell.exe` to see
+  the host's other interfaces). `--no-connect` just updates the alias.
+- `scripts/pifi.sh` — connects via the `pifi` SSH alias, falling back
+  to `find-pi.sh`'s sweep if the saved address doesn't answer. A laptop
+  `~/.bash_aliases` typically wraps this as `alias pifi='bash
+  .../scripts/pifi.sh'`, plus `findpi`/`syncpifi` for
+  `find-pi.sh --no-connect`/`sync-pifi.sh`.
+- `scripts/sync-pifi.sh` — pushes this repo onto the Pi's copy
+  (`~/pifi`) via `rsync`, since the Pi can't `git clone` it directly
+  (private repo).
+- `scripts/pentest/set-alfa-mode.sh monitor|managed` — flip the Alfa's
+  mode without touching `wlan0`/SSH reachability.
+- `scripts/pentest/pifite.py` — the interactive pentest TUI, run on the
+  Pi as `pifite` (aliased to `sudo python3 -B ~/pifi/scripts/pentest/pifite.py`,
+  passwordless via `/etc/sudoers.d/pifite-nopasswd`). See below.
 - Write session notes into `pentest-logs/` as you go.
 
-### Laptop-side shell aliases
+### `pifite`
 
-These live in the laptop's own `~/.bash_aliases` (personal shell config,
-not part of this repo) — noted here so the reasoning behind them isn't
-lost. All wrap `scripts/pentest/find-pi.sh`.
+A banner main menu, arrow keys or number keys to select:
 
-```bash
-alias findpi='bash /mnt/c/Users/mattk/code/pi/pifi/scripts/pentest/find-pi.sh --no-connect'
+1. **Network discovery** — scans (2.4GHz + 5GHz), shows results live
+   as they're found with a real countdown. `s` saves the list to disk
+   for attacks to use instead of re-scanning (re-run discovery and save
+   again to refresh it); Esc discards without saving. The saved list is
+   removed automatically when `pifite` exits.
+2. **Deauth attack** — picks a network from the saved list, scans it
+   for connected devices (live, by MAC/signal). When on the same
+   network as `wlan0`, this also runs ARP/`nmap`/NetBIOS/mDNS discovery
+   concurrently, each shown as its own step with live status. Picking a
+   device shows full details (vendor, resolved name, signal, probed
+   SSIDs) with a `Send Deauth` action; a WPA3 network gets a warning
+   that deauth is unlikely to work (Protected Management Frames).
 
-ssh() {
-  if [[ "$1" == "pifi" ]]; then
-    local ip
-    ip=$(awk '/^Host pifi$/{f=1} f && /HostName/{print $2; exit}' ~/.ssh/config)
-    if [[ -n "$ip" ]] && timeout 3 bash -c "echo > /dev/tcp/$ip/22" 2>/dev/null; then
-      command ssh "$@"
-    else
-      echo "pifi unreachable at ${ip:-<unset>} -- searching for it..." >&2
-      bash /mnt/c/Users/mattk/code/pi/pifi/scripts/pentest/find-pi.sh
-    fi
-  else
-    command ssh "$@"
-  fi
-}
+Device identification is passive by default (MAC vendor, probed SSIDs
+always available; a DHCP/mDNS/NetBIOS name only resolves on an *open*
+network). Being on the same network as the target unlocks active
+`nmap -O`/`upnp-info`/`dns-service-discovery` probing per device, which
+often reveals exact model info (Chromecast, Hue, etc.) regardless of
+the target's own WiFi encryption.
 
-syncpifi() {
-  local ip
-  ip=$(awk '/^Host pifi$/{f=1} f && /HostName/{print $2; exit}' ~/.ssh/config)
-  if [[ -z "${ip}" ]] || ! timeout 3 bash -c "echo > /dev/tcp/${ip}/22" 2>/dev/null; then
-    echo "pifi unreachable at ${ip:-<unset>} -- searching for it..." >&2
-    bash /mnt/c/Users/mattk/code/pi/pifi/scripts/pentest/find-pi.sh --no-connect
-    ip=$(awk '/^Host pifi$/{f=1} f && /HostName/{print $2; exit}' ~/.ssh/config)
-  fi
-  rsync -avz --exclude='.git' --delete /mnt/c/Users/mattk/code/pi/pifi/ "kali@${ip}:~/pifi/"
-}
-```
-
-- **`findpi`** — locate the Pi and update `~/.ssh/config`, without
-  connecting.
-- **`ssh pifi`** — a shell *function* (not a plain alias — needed for the
-  conditional logic), overriding just the `ssh` command name. Every other
-  host passes straight through untouched (`command ssh "$@"`). Only
-  `pifi` specifically gets the reachability check, falling back to a full
-  search if the configured address doesn't answer.
-- **`syncpifi`** — pushes the local repo onto the Pi's copy (`~/pifi`
-  there) via `rsync`. Needed because that copy can't be `git clone`d
-  directly on the Pi (the repo is private) — see
-  [TROUBLESHOOTING.md #6](TROUBLESHOOTING.md) for background on why the
-  Pi's `~/pifi` isn't its own git checkout. `rsync` spawns its own `ssh`
-  subprocess directly, which does **not** go through the `ssh()` function
-  above (shell functions aren't visible to child processes), so the same
-  reachable-check-then-search fallback is duplicated here rather than
-  relying on that function.
-
-A pre-existing, unrelated `pifi` alias (`cd` into this repo's directory)
-already existed on this laptop before any of the above — kept as-is, no
-naming collision, since the SSH alias is invoked as `ssh pifi` (two
-words) rather than a bare `pifi` command.
+Ctrl+C works on every screen. `q`/Esc backs out one level. Every exit
+path kills spawned `airodump-ng`/`aireplay-ng`/`nmap` children.

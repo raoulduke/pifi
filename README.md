@@ -82,13 +82,11 @@ silently swap which physical adapter is `wlan0` vs `wlan1`.
 
 ## Status
 
-Working as of 2026-09-11: `wlan1` (Alfa) confirmed in monitor mode, driver
-built and installed via DKMS, network routing fixed persistently (in
-`/boot/firmware/interfaces`, the actual persistent source — not just the
-live `/etc/` copy), `wlan0`/`wlan1` naming pinned by MAC address so it no
-longer depends on boot-time enumeration order, `avahi-daemon` enabled
-persistently (short hostname `pitail.local`), and `wlan1` now boots
-straight into monitor mode automatically via a systemd service. Phone-only
-operation from Termux (no Play Store, no laptop) confirmed working
-end-to-end, including a one-command connect helper. All verified across
-actual reboot cycles, not just live/in-session.
+Hardware and network setup is fully working and persists across reboots
+(monitor mode on boot, fixed interface names, fixed routing/clock/mDNS).
+Phone-only operation (Termux, no laptop) works end-to-end.
+
+`scripts/pentest/pifite.py` is the interactive pentest tool — a curses
+TUI run on the Pi as `pifite` (see [docs/SETUP.md](docs/SETUP.md#6-day-to-day-laptop-assisted-alternative)):
+network discovery with a saved/reusable list, live device scanning, and
+a deauth attack, with more attacks addable the same way.

@@ -263,17 +263,17 @@ session:
   arrow-key menu, structured as three nested screens you can back out
   of at any level without re-scanning:
 
-  > A curses rewrite of the tool's original `whiptail`-based UI
-  > (`scripts/pentest/attack-menu.sh`, still present, kept for
-  > reference/fallback but no longer what `attack` runs), built to fix
-  > a real limitation `whiptail` can't be worked around within: every
-  > `whiptail` screen briefly closes and reopens the terminal (confirmed
-  > via the raw byte stream — see `docs/TROUBLESHOOTING.md` #23/#25),
-  > since each separate `whiptail` invocation toggles the terminal's
+  > A curses rewrite of this tool's original `whiptail`-based UI
+  > (`attack-menu.sh` — removed; full history in
+  > `docs/TROUBLESHOOTING.md`), built to fix a real limitation
+  > `whiptail` couldn't be worked around within: every `whiptail`
+  > screen briefly closed and reopened the terminal (confirmed via the
+  > raw byte stream — see `docs/TROUBLESHOOTING.md` #23/#25), since
+  > each separate `whiptail` invocation toggles the terminal's
   > alternate-screen buffer on its own. The curses version holds the
   > screen continuously for the whole session instead — confirmed, same
   > way, to toggle it exactly once. It also doesn't disable the
-  > terminal's interrupt character the way `whiptail` does, so Ctrl+C
+  > terminal's interrupt character the way `whiptail` did, so Ctrl+C
   > works on every screen here, not just the live deauth view.
   1. **Networks**, from a scan (2.4GHz + 5GHz, live progress gauge)
      sorted strongest signal first, showing signal strength, name,

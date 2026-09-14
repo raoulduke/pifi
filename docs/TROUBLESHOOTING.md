@@ -520,6 +520,15 @@ doesn't misdiagnose one as the other.
 
 ---
 
+**A note on `attack-menu.sh`, referenced throughout entries #18-#26
+below:** that was the original `whiptail`-based implementation of the
+`attack` tool. It's been removed -- `scripts/pentest/attack-tui.py`
+(a curses rewrite, see #23/#25/#26) fully replaced it and is what
+`attack` runs now. These entries are kept as-is rather than rewritten:
+most of the underlying investigation (job control, terminal behavior,
+device-discovery completeness, etc.) directly shaped `attack-tui.py`'s
+own design, and several of its own comments point back here.
+
 ### 18. `attack` (`attack-menu.sh` via `sudo`) looks like it hangs forever after the password prompt
 
 **Symptom:** Running `attack` (or `sudo scripts/pentest/attack-menu.sh`

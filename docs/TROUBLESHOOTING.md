@@ -752,3 +752,114 @@ recorded together since they were built and tuned as one investigation:
 **Fix:** update the `sudoers.d` file's command line to match exactly, every time the aliased command line itself changes -- verified each time with `sudo -l` (confirms the rule as parsed) and a real invocation (confirms it's actually passwordless, not just present).
 
 **Takeaway:** a `NOPASSWD` entry and the alias/script it exempts have to be treated as one unit that changes together -- renaming a script or adjusting its flags is a two-file change (the alias, and the sudoers rule), not one.
+
+---
+
+### 26. Network scan appeared to hang at the end -- misdiagnosed once before finding the real cause
+
+**Symptom:** after the countdown reached `1s`, the screen froze for
+several seconds before the network-selection screen appeared.
+
+**First (wrong) theory:** `cmd` is wrapped in `timeout`, which SIGTERMs
+the process right at zero, but `airodump-ng` might take a few seconds
+to actually exit afterward (flushing files, restoring the interface) --
+plausible-sounding, and "fixed" by keeping the live display redrawing
+during that gap. **Confirmed wrong** with a standalone timing repro on
+real hardware: the wrapped process's exit (`proc.poll()`) returned
+immediately, at the same instant the countdown hit zero. No gap there
+at all.
+
+**Real cause, found by instrumenting each step:** `do_network_scan`
+runs two separate `tshark -r <pcap>` passes afterward (hidden-SSID
+resolution, then open-network gateway-IP lookup) with no visible
+progress indicator. Measured directly on this hardware: **~5.2s each**,
+run back-to-back, so **~10.5s of silent blocking** right after the
+countdown ends -- indistinguishable on screen from a hang.
+
+**Fix:** combined into one tshark pass (`resolve_network_extras()`).
+tshark's dominant cost here is decoding the whole pcap once, not the
+filter matched -- confirmed directly: a single pass with both filters
+combined took ~5.5s, the same as running either alone, cutting total
+time roughly in half. (Running the two passes *concurrently* instead
+of combining them would **not** have helped -- this is single-core
+CPU-bound decoding, not I/O wait, so it doesn't get the same win
+arp-scan+nmap's concurrency gets elsewhere in this codebase; see #13.)
+Also added a visible step-status frame while the combined pass runs,
+so a case that's still slow on a busier capture is at least shown as
+"running," not silent.
+
+**A second, real bug caught while combining the two passes:**
+`wlan.ssid` comes out of `tshark -T fields` as **raw hex** on this
+tshark version (e.g. `53756d79`), not text -- confirmed directly
+against a real capture. The pre-existing (separate) hidden-SSID
+resolution code never decoded this, so a resolved hidden network's
+name was silently storing/displaying as a hex string, not its real
+name, since that feature was first built. Fixed by hex-decoding in
+`resolve_network_extras()`; verified against real captured networks,
+correctly decoding to names like `Sumy`, `frey`, `BELL410`.
+
+**Takeaway:** confirm a "probably this" theory against real timing
+before fixing it -- the first theory was plausible, had a clean
+narrative, and was still wrong; only direct instrumentation (a
+standalone repro with timestamped prints around each step) found the
+actual bottleneck.
+
+---
+
+### 27. DHCP fingerprinting for an OS-family guess -- what's real, what's excluded, and why
+
+Requested: device discovery closer to what an ISP router app shows
+(brand/model/OS). That level of precision needs either (a) being the
+actual DHCP server with full visibility into every device's DHCP
+transaction, not just whoever's active during a scan window, or (b) a
+crowdsourced fingerprint service (Fingerbank-style) built from millions
+of real devices -- neither of which this tool has or does without an
+explicit, separate decision to start sending discovered devices' data
+to a third-party API. What's actually achievable from a WiFi client
+sniffing broadcast/multicast traffic: an **OS family** guess (Windows/
+Android/iOS/Linux), via passive DHCP fingerprinting -- the same
+technique p0f/Fingerbank/enterprise NAC tools use, just applied locally
+with a small, offline signature table instead of a live lookup.
+
+**Signatures used, and confidence, from cross-checking three
+independently maintained fingerprint databases (p0f-family, Fingerbank,
+Cisco ISE docs) plus a real capture on this project's own hardware:**
+- Windows: Option 60 vendor class contains `MSFT` -- stable across
+  every Windows version since 2000, high confidence, but only
+  identifies "Windows," not a version.
+- Android: Option 60 matching `android-dhcp-<N>` -- AOSP's own naming
+  convention, gives the major version number directly.
+- Apple (iPhone/iPad/Mac): Apple's DHCP client sends **no** Option 60
+  at all (confirmed fact, not an omission in this table) -- every
+  source consulted relies on the device's own DHCP hostname (Option
+  12) instead, e.g. a hostname containing "iPhone"/"iPad"/"MacBook".
+- Linux: Option 55's parameter-request-list `1,28,2,3,15,6,119,12,44,
+  47,26,121,42` -- confirmed to decode exactly to the request list
+  Debian/Ubuntu's `isc-dhcp-client` package ships by default, and
+  directly verified against a real DHCPREQUEST captured from this
+  project's own Pi (running Kali, Debian-based).
+- Windows' own hostname pattern (`DESKTOP-`/`LAPTOP-`) and
+  `raspberrypi` in the hostname are used as additional direct
+  hostname-based signals alongside the above.
+
+**Deliberately excluded -- no reliable signature exists, so nothing
+was hardcoded:**
+- **Chromecast/Google Cast.** The one DHCP vendor-class string found
+  during research (`dhcpcd-5.2.10:Linux-3.0.8-...:MV88DE3100`, an old
+  Marvell SoC string) appears only in informal capture discussions, not
+  in any maintained fingerprint database, and is stale against current
+  hardware anyway. OUI/mDNS-based identification (already in place) is
+  the reliable signal for these.
+- **Espressif (ESP8266/ESP32) and Tuya-platform devices.** Confirmed no
+  stable signature exists: ESP-IDF's DHCP client historically didn't
+  even send Option 60 at all (only added incrementally per SDK
+  version), and firmware varies hugely across the ESP ecosystem
+  (Arduino core vs. raw ESP-IDF vs. Tasmota/ESPHome, each a different
+  network stack) -- there is no single "ESP" or "Tuya" DHCP fingerprint
+  to match against. `VENDOR_CATEGORY_HINTS`' OUI-based `(IoT device)`
+  hint is the right tool for these, not DHCP fingerprinting.
+
+**Implementation note:** folded into the same single tshark pass that
+already extracts DHCP hostnames (`_tshark_hostnames_from_pcap()`) --
+Option 55/60/12 are all read from one packet in one pass, not a
+separate capture or extra decode cost, per #26's lesson above.

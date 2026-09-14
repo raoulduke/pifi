@@ -166,19 +166,29 @@ A banner main menu, arrow keys or number keys to select:
    again to refresh it); Esc discards without saving. The saved list is
    removed automatically when `pifite` exits.
 2. **Deauth attack** — picks a network from the saved list, scans it
-   for connected devices (live, by MAC/signal). When on the same
-   network as `wlan0`, this also runs ARP/`nmap`/NetBIOS/mDNS discovery
-   concurrently, each shown as its own step with live status. Picking a
-   device shows full details (vendor, resolved name, signal, probed
-   SSIDs) with a `Send Deauth` action; a WPA3 network gets a warning
-   that deauth is unlikely to work (Protected Management Frames).
+   for connected devices (live, by MAC/signal, with IP and MAC shown
+   once resolved). When on the same network as `wlan0`, this also runs
+   ARP/`nmap`/NetBIOS/mDNS discovery concurrently, each shown as its
+   own step with live status. Picking a device shows full details
+   (vendor, resolved name, OS guess, signal, probed SSIDs) with a
+   `Send Deauth` action; a WPA3 network gets a warning that deauth is
+   unlikely to work (Protected Management Frames).
 
 Device identification is passive by default (MAC vendor, probed SSIDs
 always available; a DHCP/mDNS/NetBIOS name only resolves on an *open*
-network). Being on the same network as the target unlocks active
-`nmap -O`/`upnp-info`/`dns-service-discovery` probing per device, which
-often reveals exact model info (Chromecast, Hue, etc.) regardless of
-the target's own WiFi encryption.
+network). Vendor names that are really chip/platform suppliers rather
+than a device brand (Espressif, Tuya) get an `(IoT device)` hint;
+Vantiva (a real router/gateway OEM) gets `(router/gateway)`. A DHCP
+fingerprint (Option 55/60) gives a best-effort **OS family** guess —
+Windows/Android/iOS/Linux — from well-corroborated public signatures
+only; this is not the same as a specific model/version (see
+[TROUBLESHOOTING.md](TROUBLESHOOTING.md) for why that needs either
+full router-level visibility or a crowdsourced fingerprint service
+neither of which this tool has). Being on the same network as the
+target additionally unlocks active `nmap -O`/`upnp-info`/
+`dns-service-discovery` probing per device, which often reveals exact
+model info (Chromecast, Hue, etc.) regardless of the target's own WiFi
+encryption.
 
 Ctrl+C works on every screen. `q`/Esc backs out one level. Every exit
 path kills spawned `airodump-ng`/`aireplay-ng`/`nmap` children.

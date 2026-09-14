@@ -928,3 +928,95 @@ devices involved -- no realistic amount of tuning makes a single scan
 window deterministic against a device that might simply not be awake
 during it -- but the measured data above shows one combined pass gets
 close to what repeated single-tool runs need several tries to match.
+
+### 27. Better network/device resolution: hidden SSIDs, more vendors, richer device names -- and a real hardware ceiling found along the way
+
+Four related improvements, requested together, covered here as one
+entry:
+
+**Hidden SSID resolution (passive only).** The network scan now also
+captures a pcap (`--output-format csv,pcap`, same as the device scan
+already did) and, after the scan, checks it for 802.11 **probe
+response** frames (`wlan.fc.type_subtype==0x05`) -- these are
+management frames, cleartext regardless of the target network's own
+encryption, so whenever a client happens to probe for a hidden network
+during the scan window, the AP's response reveals its real name.
+Purely passive -- nothing is transmitted to provoke this, it's
+whatever organically happened on the air. Ceiling: on a real scan (135
+networks), 70 stayed `<hidden>` -- most hidden networks simply have no
+client probing for them during any given ~25s window, and this is not
+worked around by scanning longer or more often; deliberately not
+extended into anything active (e.g. deauthing a client to force a
+reconnect/probe) since that's a materially different, more invasive
+technique than the rest of this passive-recon flow.
+
+**LANIP column.** airodump-ng's AP CSV output has a `LANIP` field --
+occasionally populated from cleartext broadcast traffic the AP itself
+sent that airodump happened to see, more often blank. Now parsed and
+shown; blank shows as `-`. Devices already had (and still show) their
+own IP from the existing arp-scan/nmap-sn discovery.
+
+**Vendor resolution: two independent OUI databases, not one.**
+`mac_vendors_bulk()` now falls back to nmap's own bundled
+`nmap-mac-prefixes` database for any prefix `ieee-data`'s `oui.txt`
+doesn't have (different, independently maintained source -- sometimes
+one has an entry the other doesn't). Ceiling that's NOT a database gap
+and can't be fixed by adding a third source: a locally-administered /
+randomized MAC (common on modern phones for privacy) was never tied to
+a real hardware vendor in the first place -- deliberately, by design
+of the address itself.
+
+**Richer device names, not just vendor brand -- with a hardware
+ceiling found while building it.** Previously, a device only got a
+real name (rather than falling back to its vendor, e.g. "Philips
+Lighting BV") from DHCP/mDNS/NetBIOS traffic sniffed from the TARGET
+network's own capture, which only ever works against an OPEN network
+(WPA/WPA2/WPA3 encrypts data frames). Two same-network-only additions,
+both running concurrently with everything else in `do_device_scan`
+(same reasoning as #26 -- close to zero added wall time):
+- A bulk `nbtscan` across the whole subnet in one pass (NetBIOS
+  computer names), joined against the MAC->IP map from #26's
+  discovery.
+- A short passive capture on **wlan0 itself** -- our own
+  already-authenticated LAN link, not the target network's -- for the
+  same DHCP/mDNS/NetBIOS traffic. This works regardless of the
+  TARGET network's encryption, since it never touches that network's
+  frames at all: broadcast/multicast chatter other devices send on
+  the same physical LAN anyway.
+
+Building the wlan0 capture surfaced two real bugs, both fixed, and one
+real hardware ceiling that's just been documented rather than "fixed":
+
+- **Bug:** the mDNS filter only checked `dns.qry.name` (resolution
+  *queries*). Confirmed on a real network that this misses a lot: a
+  Philips Hue bridge's periodic self-announcements ("Hue Bridge -
+  05AB3A._hue._tcp.local", far richer than "Philips Lighting BV") are
+  pure **response** packets, invisible to a query-only filter. Now
+  checks both `dns.qry.name` and `dns.resp.name`.
+- **Bug:** tshark's default field-joining comma-concatenates every
+  instance of a repeated field into one string per packet (e.g. every
+  PTR/SRV record in one mDNS packet) -- a value that happens to end in
+  ".local" could still come out as an unusable
+  `real.name.local,other,junk` blob. Fixed with `-E occurrence=f`
+  (first instance only). Also: a name starting with `_` is a bare
+  service-*type* query (e.g. a client asking "who offers
+  `_companion-link._tcp.local`?"), not an actual device identity --
+  filtered out rather than shown as a misleading pseudo-name.
+- **Hardware ceiling, not a bug:** the wlan0 capture is CPU-starved
+  when run concurrently with everything else this board is already
+  doing (arp-scan, nmap -sn, nbtscan, and the airodump-ng device scan
+  itself, all on one ARM11 core). Measured directly: the *same*
+  capture, run in isolation, caught 36 packets / 12KB in 15s and
+  correctly resolved a device name; run concurrently with the other
+  four operations, it caught as little as 380 bytes in the same
+  window and resolved nothing. Mitigated by giving it nearly the full
+  device-scan window (`SCANTIME_DEVICES - 1`, not a fixed short
+  duration) rather than eliminated -- there's a real limit to how much
+  this single-core board can do at once, and this capture is the one
+  most exposed to losing that contention. When it does catch
+  something, the name is often much richer than a plain vendor lookup
+  (device model/product name, not just manufacturer).
+
+`SCANTIME_DEVICES` raised from 10s to 15s (requested alongside these)
+-- also gives the concurrent discovery work (especially the
+CPU-starved wlan0 capture above) more of a window to work with.

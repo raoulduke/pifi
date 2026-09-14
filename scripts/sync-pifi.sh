@@ -11,6 +11,13 @@
 
 set -euo pipefail
 
+# A CDPATH with "." in it (common, e.g. for a `cd` that also jumps to
+# subdirectories by name) makes bash echo the resolved directory to
+# stdout on every `cd` it's consulted for -- silently corrupting the
+# `$(cd ... && pwd)` capture below with an extra line. Not this
+# script's business to depend on the caller's CDPATH either way.
+unset CDPATH
+
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SSH_CONFIG="${HOME}/.ssh/config"
 FIND_PI="${REPO_DIR}/scripts/pentest/find-pi.sh"
@@ -23,9 +30,11 @@ if [[ -z "${ip}" ]] || ! timeout 3 bash -c "echo > /dev/tcp/${ip}/22" 2>/dev/nul
   ip=$(awk '/^Host pifi$/{f=1} f && /HostName/{print $2; exit}' "${SSH_CONFIG}")
 fi
 
-# __pycache__/*.pyc excluded alongside .git -- attack-tui.py (Python)
+# __pycache__/*.pyc excluded alongside .git -- pifite.py (Python)
 # means a local `python3 -m py_compile` before syncing leaves one of
 # these behind, and without an explicit exclude here it gets shipped
-# to the Pi too (rsync only respects .gitignore for what IT tracks,
-# not for what it's asked to sync).
-rsync -avz --exclude='.git' --exclude='__pycache__' --exclude='*.pyc' --delete --delete-excluded "${REPO_DIR}/" "kali@${ip}:~/pifi/"
+# to the Pi too. .claude/ is Claude Code's own local session state,
+# specific to whichever machine is running it, not project state.
+# (rsync only respects .gitignore for what IT tracks, not for what
+# it's asked to sync, so these need to be listed here too.)
+rsync -avz --exclude='.git' --exclude='__pycache__' --exclude='*.pyc' --exclude='.claude' --delete --delete-excluded "${REPO_DIR}/" "kali@${ip}:~/pifi/"

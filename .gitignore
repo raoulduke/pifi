@@ -24,3 +24,7 @@ build.log*
 Thumbs.db
 __pycache__/
 *.pyc
+
+# Claude Code session state -- local to whichever machine is running
+# it, not project state.
+.claude/

@@ -476,14 +476,16 @@ ARM1176 core) — not `armhf`, and not `arm64`. `fzf` is written in Go, and
 Kali doesn't build/ship a Go toolchain output for `armel` at all (`apt-cache
 search fzf` / `apt-cache policy fzf` come back completely empty, not just
 "not installed" — the package doesn't exist for this architecture,
-period). This applies to other Go-based CLI tools too, not just `fzf`.
+period). This applies to other Go-based CLI tools too, not just `fzf` —
+worth checking before picking any new CLI dependency for this board.
 
-**Fix:** use `whiptail` instead for anything needing an interactive
-arrow-key menu — it's a small, old, C-based (`newt`) tool with real armel
-support, and it's already installed on this image. `dialog` is also
-present as an alternative with a similar API.
-`scripts/pentest/attack-menu.sh` uses `whiptail --menu` for exactly this
-reason.
+**Fix at the time:** used `whiptail` instead (small, old, C-based
+`newt` tool with real `armel` support, already installed on this
+image) for the interactive menu. That script (`attack-menu.sh`) has
+since been replaced by `scripts/pentest/pifite.py`, a Python/curses
+TUI — curses is in Python's standard library, so this architecture
+constraint doesn't apply to it at all. See #18 for why that rewrite
+happened.
 
 ---
 
@@ -519,536 +521,234 @@ permission error separately from a genuinely-absent address, so it
 doesn't misdiagnose one as the other.
 
 ---
+### 18. Why the interactive attack menu is Python/curses, not shell+`whiptail`
 
-**A note on `attack-menu.sh`, referenced throughout entries #18-#26
-below:** that was the original `whiptail`-based implementation of the
-`attack` tool. It's been removed -- `scripts/pentest/attack-tui.py`
-(a curses rewrite, see #23/#25/#26) fully replaced it and is what
-`attack` runs now. These entries are kept as-is rather than rewritten:
-most of the underlying investigation (job control, terminal behavior,
-device-discovery completeness, etc.) directly shaped `attack-tui.py`'s
-own design, and several of its own comments point back here.
+The original interactive menu (`attack-menu.sh`, removed) was bash +
+`whiptail` (see #16 for why `whiptail` over `fzf` in the first place).
+It was replaced by `scripts/pentest/pifite.py`, a single persistent
+curses program, after `whiptail` turned out to have several problems
+with no fix available from within `whiptail` itself. Recorded here so
+a future shell+`whiptail` wrapper doesn't get built and rediscover
+each of these one at a time:
 
-### 18. `attack` (`attack-menu.sh` via `sudo`) looks like it hangs forever after the password prompt
+- **Every `whiptail` call needs job control on, or it hangs silently.**
+  A non-interactive `bash script.sh` runs with job control off by
+  default; a full-screen program like `whiptail` or `airodump-ng` doing
+  real terminal ioctls without the terminal's foreground process group
+  gets stopped outright by the kernel (`SIGTTOU`, shows as state `T` in
+  `ps`) — indistinguishable from a plain hang. Fix at the time: `set -m`
+  near the top of the script. (A plausible-looking but wrong lead
+  investigated first: `sudo`'s `Defaults use_pty` — confirmed to take
+  effect, confirmed the hang persisted identically anyway, so not the
+  cause. Worth knowing `use_pty` creates a second nested pty for other
+  reasons, but it wasn't this bug.)
+- **No way to build a live-updating dialog with a Cancel button.** The
+  natural approach — a `--timeout` flag so a dialog returns on its own
+  for a redraw loop — doesn't exist in this image's `whiptail` (0.52.25,
+  the `newt` build). Worked around with a plain full-screen loop
+  (`clear` + `echo` + `read -r -t 1`) instead of a dialog for the live
+  deauth view.
+- **Ctrl+C only ever worked on that one plain-loop screen, nowhere
+  else, with no fix available.** `newt` (the library behind `whiptail`)
+  puts the terminal into a mode that explicitly unbinds the interrupt
+  character the instant it takes the screen (confirmed live via
+  `stty -a`: `intr = <undef>` while any `whiptail` dialog is showing) —
+  no keypress can generate `SIGINT` while it owns the terminal, on any
+  client, and this isn't something the calling script's own code can
+  override. Esc/Cancel still worked (a plain keystroke `newt` reads
+  itself), just not Ctrl+C.
+- **Every separate `whiptail` invocation flickers the whole terminal.**
+  Confirmed by capturing the raw byte stream: each `whiptail` call
+  independently toggles the alternate-screen buffer
+  (`\e[?1049h`/`\e[?1049l`) on entry/exit, so a chain of one process per
+  screen toggles it between every single screen — this is what read as
+  the UI "closing and reopening." No flag makes that buffer persistent
+  across separate invocations; the only real fix is one process holding
+  the screen for the whole session.
 
-**Symptom:** Running `attack` (or `sudo scripts/pentest/attack-menu.sh`
-directly), entering the `kali` sudo password, and then... nothing.
-No output, no menu, no error — indistinguishable from a genuine hang.
+**Fix:** `pifite.py` — one `curses.wrapper()` for the entire program
+lifetime (confirmed, same byte-stream method, to toggle the
+alternate-screen buffer exactly once for a full multi-screen session),
+using `cbreak()` rather than `raw()` so the terminal's interrupt
+character is never touched — Ctrl+C generates a real `SIGINT` on every
+screen. Every external-tool invocation and parsing rule was ported
+faithfully from the bash version's logic rather than rewritten from
+scratch, so behavior didn't drift between the two versions.
 
-**Root cause:** the script is a non-interactive `bash script.sh`
-invocation, which means bash's job control (`monitor` mode) is off by
-default — that's normally invisible, but this script runs full-screen
-terminal programs (`whiptail`, `airodump-ng`) that do real terminal
-ioctls (redrawing, or resetting terminal state on exit). Without job
-control, bash never hands foreground-process-group ownership of the
-terminal over to those child processes when it runs them — so the
-first time one of them touches the terminal while not actually the
-foreground process group, the kernel stops it with `SIGTTOU`/`SIGTTIN`
-(process shows as `T` in `ps`). It isn't backgrounded and isn't making
-progress; it's frozen until something sends it `SIGCONT` in the right
-context, which won't happen on its own. Confirmed with `ps -eo
-pid,ppid,pgid,tty,stat,cmd` showing `airodump-ng` (and its wrapping
-`timeout`) sitting in state `T`.
-
-**False lead investigated first:** `/etc/sudoers` has `Defaults
-use_pty` set globally (a Debian/Kali hardening default), and `sudo`'s
-internal fork/monitor architecture under `use_pty` does put the actual
-command on a second, freshly-allocated pty distinct from the invoking
-terminal's — which looked like a very plausible cause of exactly this
-class of job-control confusion, and was the first fix attempted (a
-per-command `Defaults!` override in `/etc/sudoers.d/` disabling
-`use_pty` just for this script). That change was verified to actually
-take effect (confirmed via `sudo -ll`, and by the process tree
-collapsing from two ptys to one) but the hang persisted identically
-even on a single pty — proving `use_pty` was not the actual cause. It
-was removed again once the real cause (below) was found and confirmed
-to fix it on its own. Worth recording so this isn't re-investigated
-from scratch next time — the two-pty split from `use_pty` is a red
-herring here, not nothing (it's real, and worth knowing about for
-other scenarios), just not the cause of *this* symptom.
-
-**Fix:** added `set -m` near the top of `attack-menu.sh`, turning job
-control on for this non-interactive script. Confirmed fixed by running
-the full flow under a real SSH-allocated pty (not wrapped in `script`,
-which turned out to add its own confounding pty layer during
-investigation) and checking `ps` throughout — `airodump-ng` and
-`whiptail` both ran and rendered correctly with no `T`-state processes
-at any point, including at the natural end of the 10-second scan
-(previously the exact point it froze).
-
----
-
-### 19. `attack-menu.sh`: long gap after the scan gauge closes, and menus clipped on the left
-
-**Symptom 1:** After the scan progress gauge reaches 100% and closes,
-there's a noticeable multi-second pause with nothing on screen before
-the network/device selection menu actually appears.
-
-**Root cause:** parsing the scan CSV forked `echo | xargs` (or
-`echo | tr`) up to four times per line just to trim whitespace off each
-field. A dense-neighborhood scan easily finds 100+ networks, and on the
-Pi Zero W's single slow ARM11 core, hundreds of forked subprocesses for
-nothing but string trimming took multiple seconds. Separately, resolving
-each device's MAC vendor called `awk` over the full ~215,000-line
-`ieee-data` OUI database **once per device** -- measured at ~4.3
-seconds *per call* on this board, so even a modest device list added
-tens of seconds on top.
-
-**Fix:**
-- Added a `trim()` helper using pure bash parameter expansion (no fork)
-  in place of every `echo | xargs`/`echo | tr` trim. Benchmarked on a
-  synthetic 150-network CSV: **20.1s -> 0.7s**.
-- Added `mac_vendors_bulk()`, which resolves every device's vendor in
-  **one** pass over the OUI database (a single `awk` invocation matching
-  a whole set of wanted prefixes) instead of one full-file scan per
-  device. Benchmarked with 30 synthetic MACs: correctly resolved known
-  vendors and left unknown ones empty, in ~2.6s total regardless of
-  device count -- previously would have been ~30 x 4.3s ≈ 129s.
-
-**Symptom 2:** The network-selection menu's title renders as "elect a
-WiFi network" -- the leading "S" is missing, cut off the left edge of
-the screen.
-
-**Root cause:** `whiptail --menu`/`--gauge`/`--msgbox` widths were
-hardcoded (78, 70, etc.). `whiptail` centers its dialog box on the
-terminal's actual column count; if the box is specified wider than the
-real terminal (a phone SSH client's terminal can easily be narrower than
-78 columns), the excess renders off the *left* edge -- clipped, not
-wrapped or shrunk.
-
-**Fix:** added `safe_w()`, which reads the real terminal width via
-`tput cols` and caps any requested dialog width to fit it (with a floor
-of 20 so a very narrow terminal still gets a usable, if cramped, dialog).
-Applied to every `whiptail` call in the script.
+**A generic pitfall hit while building it:** `ESCDELAY` (how long
+curses waits to disambiguate a lone Esc from the start of an arrow-key
+escape sequence) has to be set in the environment *before*
+`curses.wrapper()` is called — it calls `initscr()` internally, which
+is when ncurses actually reads it. Setting it from inside the wrapped
+function is a silent no-op.
 
 ---
 
-### 20. No way to build a live-updating `whiptail` dialog with a Cancel button
+### 19. `nmap` NSE output parsing: one script's block bled into the next
 
-**Symptom while building the deauth screen:** wanted a dialog showing
-elapsed time and a live status, refreshing on its own every second,
-while still letting a keypress cancel it at any point -- the natural
-way to do that with `whiptail`/`dialog` is a `--timeout` flag that
-returns the dialog automatically if no key is pressed within N seconds,
-so it can be redrawn in a loop.
+**Symptom:** extracting a specific NSE script's output (e.g.
+`upnp-info`) from `nmap`'s text output sometimes captured a second
+script's output appended to the end of it.
 
-**Root cause:** this image's `whiptail` is 0.52.25 (the `newt`-based
-build, confirmed via `whiptail --help`), which has no `--timeout`
-option at all -- that flag exists in `dialog` and in some other
-`whiptail` builds, but not this one. Without it, any `whiptail` call
-blocks indefinitely waiting for a keypress; there's no way to have it
-return on its own to redraw updated content.
+**Root cause:** consecutive NSE scripts' output sits back-to-back with
+no blank line between them, both just `|`-prefixed continuation lines.
+Stopping extraction only at the first *non*-`|` line doesn't know where
+one script's block ends and the next begins, so it silently merges
+them.
 
-**Fix:** don't fight the missing flag -- the deauth status view
-(`run_deauth()` in `attack-menu.sh`) uses a plain full-screen loop
-instead of a `whiptail` dialog: `clear` + `echo` the current elapsed
-time/status each second, and `read -r -t 1 key` (a real bash builtin
-with its own timeout) to both wait ~1s AND check for a `q` keypress in
-the same step. Simpler and more reliable here than depending on a flag
-this particular build doesn't have.
+**Fix:** also stop at a new `| scriptname:` marker line, not just at
+the first non-`|` line. Still the exact rule `pifite.py`'s
+`parse_nmap_output()`/`extract_block()` uses today.
 
 ---
 
-### 21. Two subtle bugs writing the nmap-model-info parsing (UPnP/DNS-SD)
+### 20. Resolving MAC vendors one-by-one against the OUI database was too slow to use
 
-Found while adding active UPnP/DNS-SD device-model lookups to
-`attack-menu.sh`'s device-info screen (unable to test against real
-devices at the time — the Pi was on an away hotspot unreachable from
-the machine doing the writing — caught instead with a synthetic nmap
-output sample built from the documented NSE output format). Recording
-both since they're generic pitfalls, not specific to this one script.
+**Symptom:** a scan with a modest device list took tens of extra
+seconds just to label each device's vendor.
 
-**Bug 1 — `paste -sd', ' -` doesn't do what it looks like it does.**
-`paste -d` treats a *multi-character* delimiter argument as **separate
-delimiter characters to cycle through per join**, not one two-character
-delimiter — so joining `80/tcp`, `1900/udp`, `5353/udp` with `-d', '`
-produces `80/tcp,1900/udp 5353/udp` (alternating comma, then space,
-then comma...), not `80/tcp, 1900/udp, 5353/udp`. Easy to miss since
-it "looks" correct and the first join happens to come out right.
-**Fix:** build the joined string in `awk` directly
-(`{if(o)o=o", "$1; else o=$1} END{print o}`) instead of piping to
-`paste` for any delimiter longer than one character.
+**Root cause:** the vendor lookup ran a full scan of the ~215,000-line
+`ieee-data` OUI database **once per device** — measured at ~4.3 seconds
+*per call* on this board's single ARM11 core.
 
-**Bug 2 — extracting one `nmap` NSE script's output block bled into
-the next script's block.** Two scripts' output sit back-to-back in
-`nmap`'s output with no blank line between them, both just
-`|`-prefixed continuation lines — stopping extraction only at the
-first *non*-`|` line means a block that reads "keep collecting `|`
-lines" doesn't know where one script's output ends and the next
-one's begins, and silently merges them. **Fix:** also stop at a new
-`| scriptname:` marker line, not just at the first non-`|` line —
-i.e. `f && /^\|[_ ]?[a-zA-Z0-9_-]+:/{exit}` *before* the generic
-`f && /^\|/{print; next}` continuation rule.
+**Fix:** resolve every device's vendor in **one** pass instead — a
+single `awk` invocation matching the whole set of wanted prefixes at
+once. Benchmarked at ~2.6s total regardless of device count, versus
+~4.3s × device count before. Still how `pifite.py`'s
+`mac_vendors_bulk()` does it today, falling back to `nmap`'s own bundled
+`nmap-mac-prefixes` database for anything the primary one doesn't have
+(a different, independently maintained source that sometimes has an
+entry the other doesn't). Neither source will ever resolve a
+locally-administered/randomized MAC (common on modern phones for
+privacy) — that address was never tied to a real hardware vendor in the
+first place, by design, not a database gap.
 
-### 22. `attack-menu.sh`: Ctrl+C only stopped the script from some screens
+---
 
-**Symptom:** Ctrl+C during the live deauth status view stopped
-everything as documented, but hitting it on a network/device menu, a
-scan gauge, or the device-info screen instead just backed out one
-level (like pressing Back/Cancel) or did nothing visible, leaving the
-script running.
+### 21. Passive-only device discovery misses devices that a plain `arp-scan`/`nmap -sn` would catch
 
-**Cause:** `set -m` job control (needed elsewhere so `airodump-ng`'s
-terminal ioctls don't get `SIGTTOU`-stopped, see #18) means every
-foreground `whiptail` dialog or gauge runs in its *own* process group
-and briefly owns the terminal's foreground control. Ctrl+C (`SIGINT`)
-is delivered to *that* process group, not to `attack-menu.sh`'s own
-process — the script only learns anything happened via the dialog's
-exit code afterward. The live deauth view was the one screen immune
-to this: its polling loop uses bash's own `read` builtin, which doesn't
-fork a new process group, so the script's own process (with no `INT`
-trap, hence bash's default terminate-on-SIGINT) receives the signal
-directly and dies — triggering the `EXIT` trap's cleanup normally.
-Every other screen's `whiptail` call was only ever checked with a bare
-`||`, which can't distinguish "killed by Ctrl+C" (exit 128+signal,
-130 for `SIGINT`) from an ordinary Cancel/Esc button (1/255) — both
-fell into the same "go back" branch.
+**Symptom:** on a home network with 11-14 live hosts (confirmed with
+`nmap -sn`), the passive device-scan list showed as few as 6.
 
-**Fix attempted:** added `is_interrupted()` (checks for an exit code
-`>= 128`) and call it after every `whiptail` invocation and after the
-scan gauge's own pipeline (`PIPESTATUS[1]`, since the gauge's exit code
-is otherwise never inspected at all) — an interrupted one now kills any
-still-running background scan and `exit`s the whole script instead of
-falling through to Back/Cancel handling. Also moved `run_deauth()`'s
-per-session scratch dir (`monwork`) into a global (`MONWORK`) so the
-top-level `EXIT` trap can remove it even when Ctrl+C terminates the
-script straight out of the deauth loop, skipping that function's own
-post-loop `rm -rf` entirely.
+**Root cause:** a purely passive `airodump-ng` capture only records a
+device that happens to transmit an 802.11 frame during the scan
+window — an idle device, or one with nothing to send right then, is
+invisible to it no matter how long the window runs. Repeating `nmap
+-sn` against an unchanged network gave different host counts (11-14)
+run to run with no passive capture involved at all — the extra devices
+it sometimes catches (and `arp-scan` sometimes catches that it
+doesn't) are typically power-saving smart-home devices whose radios
+cycle between asleep and briefly awake, so a single probe landing
+outside a device's awake window simply gets no reply.
 
-**This fix turned out to be incomplete/beside the point — see #23.**
-The reasoning above about process groups is correct as far as it goes,
-but there's a more fundamental blocker underneath it that this fix
-doesn't address: keeping `is_interrupted()` and `MONWORK` anyway, since
-neither is wrong, just insufficient on its own (`is_interrupted()` in
-particular is now dead code for the whiptail-dialog case specifically —
-see #23 for why — but harmless, and still correct for a process that's
-genuinely signal-killed some other way).
+**Fix, confirmed with a live A/B test (5 runs each):** when genuinely
+on the same network via `wlan0`, run `arp-scan` **and** `nmap -sn`
+**concurrently** (not sequentially, and started *before* the passive
+capture rather than after — the point is added completeness for close
+to zero added wall time) and union their MAC→IP results. The union
+came out `>= max(arp, nmap)` in every run, often strictly more than
+either alone, and got within one device of what five *repeated* runs
+of either tool alone needed to match — in a single pass. Devices found
+this way have no signal-strength reading (the passive capture never
+saw them); shown as `?` and sorted to the bottom, same as any
+unmeasured signal. This remains fundamentally probabilistic against
+this class of intermittently-sleeping device — no scan-window tuning
+makes it deterministic — but one combined pass gets close to what
+several repeated single-tool runs need to match. Still how
+`pifite.py`'s `do_device_scan()` does it today.
 
-### 23. `attack-menu.sh`: ...and the real reason Ctrl+C still didn't work, even after #22's fix
+---
 
-**Symptom:** after deploying #22's fix, Ctrl+C *still* did nothing on
-any `whiptail` screen (network/device menus, scan gauges, device-info)
-— confirmed on a real device (Pixel 3 + Termux) over several rounds of
-testing, including after ruling out `sudo`'s `Defaults use_pty` (which
-really does create a second, nested pty for the command — confirmed
-with `ps` showing two separate `sudo` processes on two separate
-`pts/N` devices — a very plausible-looking suspect, but proven not the
-cause: a directly-sent `SIGINT` to the right process group killed the
-whole nested tree just fine even through that nesting).
+### 22. Getting real device names (not just vendor) and a real network IP, and a CPU-contention ceiling found along the way
 
-**Investigation:** every test using `kill -INT <pgid>` from a second
-SSH session — simulating what a terminal's Ctrl+C does — showed the
-script terminating correctly, cleanup and all. That was the misleading
-part: `kill -INT` delivers the signal directly via syscall, which
-works regardless of terminal state, so it could never have caught the
-real bug. The actual test that mattered was checking the terminal's
-own settings live with `stty -a` while a real run was in progress:
+Four related pieces of `pifite.py`'s current device/network resolution,
+recorded together since they were built and tuned as one investigation:
 
-```
-# Before any whiptail dialog:
-intr = ^C; ... isig icanon iexten echo ...
+- **Network list IPs.** `airodump-ng`'s passively-sniffed `LANIP` field
+  needs to catch the AP's own *cleartext* broadcast traffic to populate
+  — on any WPA/WPA2/WPA3 network (nearly everything) even the AP's own
+  broadcasts are encrypted, so this essentially never resolves (0 of
+  135 networks on a real scan). Not fixable with more scan time — it's
+  not visible to a passive listener at all on an encrypted network.
+  Fix: for whichever *one* network `wlan0` is actually connected to,
+  its real gateway IP is already known directly (`ip route show
+  default`), no monitoring involved. Every other network in the list
+  genuinely has no IP obtainable this way.
+- **Hidden SSID resolution (passive only).** A scan also captures a
+  pcap and checks it for 802.11 **probe response** frames — cleartext
+  management frames regardless of the target network's own encryption
+  — so whenever a client happens to probe for a hidden network during
+  the scan window, the AP's response reveals its real name. Ceiling: on
+  a real scan (135 networks), 70 stayed `<hidden>` — most hidden
+  networks simply have no client probing for them during any given
+  window, and this isn't worked around by scanning longer; deliberately
+  not extended into anything active (e.g. deauthing a client to force a
+  reconnect/probe), a materially more invasive technique than the rest
+  of this passive-recon flow.
+- **Richer device names when on the same network.** Beyond DHCP/mDNS/
+  NetBIOS sniffed from the *target* network's own capture (open
+  networks only, per #21's neighbor entry), two same-network-only
+  sources run concurrently with everything else: a bulk `nbtscan`
+  across the subnet, and a short capture on **wlan0 itself** — our own
+  already-authenticated link, not the target network's — for the same
+  DHCP/mDNS/NetBIOS traffic, which works regardless of the target
+  network's encryption since it never touches that network's frames at
+  all. Building this surfaced two real bugs (both fixed, still worth
+  knowing about as generic pitfalls): the mDNS filter only checked
+  query packets, missing devices (e.g. a Philips Hue bridge) whose only
+  traffic is periodic *response* self-announcements — now checks both;
+  and `tshark`'s default field-joining comma-concatenates every
+  instance of a repeated field into one string, so a real value ending
+  in `.local` could still come out as an unusable
+  `real.name.local,other,junk` blob — fixed with `-E occurrence=f`
+  (first instance only).
+- **CPU-contention ceiling on the wlan0 capture — mitigated, not
+  eliminated.** Five things compete for this board's one ARM11 core at
+  once (arp-scan, `nmap -sn`, nbtscan, the wlan0 capture, and the
+  airodump-ng device scan itself). The wlan0 capture is the one that
+  loses entire packets (not just time) when starved — measured directly
+  at 36 packets/12KB caught in isolation vs. as little as 380 bytes
+  caught under full contention in the same window. Fix: `nice -n 10` on
+  the three lighter helpers (arp-scan, nmap, nbtscan — they matter less
+  if delayed) and `nice -n -10` on the wlan0 capture. Verified live: a
+  device that previously resolved nothing under contention reliably
+  resolved its real name afterward. Still how
+  `start_wlan0_discovery()` prioritizes things today — there's a real
+  limit to how much this single-core board can do at once, and this is
+  the capture most exposed to losing that contention.
 
-# The instant whiptail takes the screen (gauge OR menu -- checked both):
-intr = <undef>; ... isig -icanon -iexten -echo ...
-```
+---
 
-`isig` (the terminal mode that turns special characters into signals)
-is still nominally on, but `intr` — the character bound to generating
-`SIGINT` — has been explicitly unbound. With no character bound to it,
-**no keypress can generate `SIGINT` at all** while `whiptail` owns the
-terminal. This is `newt` (the library behind `whiptail`) taking over
-raw keyboard handling for its own dialogs, deliberately clearing the
-interrupt binding so it can interpret every keystroke itself (this is
-exactly how Esc-as-Cancel already works — Esc is a plain byte `newt`
-reads and acts on in its own input loop, not something signal-based).
-It's inherent to `whiptail`/`newt`, true on any client (phone SSH app,
-laptop terminal, tmux, anything), and not something this script's own
-code can override or work around while a dialog is showing.
+### 23. `sync-pifi.sh` silently synced nothing -- a `CDPATH` with `.` in it corrupts `$(cd ... && pwd)`
 
-**Conclusion / fix:** documented rather than "fixed" — see the Ctrl+C
-note near the top of `attack-menu.sh` and in `docs/SETUP.md`. Ctrl+C
-genuinely only works on the live deauth view (which never uses
-`whiptail` — its polling loop is a plain `read` builtin, so the
-terminal stays in normal mode) and at an ordinary shell prompt. Esc
-already works to back out of any menu/device-info/yes-no screen. Scan
-gauges (`whiptail --gauge`) have no interactive escape at all right
-now — `--gauge` takes no keyboard input, period — a scan has to run to
-completion; a considered alternative (dropping `whiptail` for a plain
-text progress ticker on just the scan screens, which would leave the
-terminal in normal mode and make Ctrl+C genuinely work there) was
-decided against for now to keep the gauge's visual polish.
+**Symptom:** `rsync` failed with `change_dir "<repo-path>\n<repo-path>" failed: No such file or directory` -- the captured path was the real path **duplicated with a newline in between**.
 
-### 24. `attack-menu.sh`'s device list found far fewer devices than `nmap -sn` on the same network
+**Root cause:** a `CDPATH` containing `.` (common, e.g. so a bare `cd <subdir-name>` also matches subdirectories by name) makes bash's `cd` builtin echo the resolved directory to stdout whenever `cd` is *consulted* -- which happens even for the trivial `.` entry, not just a "real" jump via one of the other entries. `REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"` was silently getting that extra echoed line prepended to `pwd`'s own output inside the same command substitution, corrupting the captured path.
 
-**Symptom:** on a home network with 11 live hosts (confirmed with
-`sudo nmap -sn 10.0.0.0/24`), the device-selection list showed only 6.
+**Fix:** `unset CDPATH` at the top of `sync-pifi.sh`, before computing `REPO_DIR`. Not this script's business to depend on the caller's `CDPATH` either way.
 
-**Cause:** the device list was built purely from the passive
-`airodump-ng` capture, which only records a device if it happens to
-transmit an 802.11 frame during the (10s) scan window. An idle device,
-or one that just doesn't have anything to send right then, is
-completely invisible to it no matter how long the window runs — this
-is fundamental to passive capture, not a bug in the capture itself.
-`nmap -sn` (and the `arp-scan` this script already runs, on the same
-network, for per-device IP lookup) instead sends an ARP request to
-every address on the subnet and counts who replies — it can't miss a
-live host that way, but it only works when actually on that network
-(unlike the passive capture, which is the only option at all against a
-network you're monitoring but not authenticated on).
+**Takeaway:** any script that captures `$(cd ... && pwd)` should not assume a "plain" relative `cd` is silent -- `CDPATH` can make it print. `unset CDPATH` defensively in scripts that do this, rather than debugging a mysteriously-duplicated path later.
 
-**Fix:** when genuinely on the same network via `wlan0` (the existing
-`SAME_NETWORK` check), merge in any MAC the ARP scan found that the
-passive capture didn't, instead of only using ARP results to enrich
-devices airodump already had. These merged-in entries have no signal
-reading (airodump never saw them to measure one), which the existing
-"show `?`, sort to the bottom" handling for unmeasured signal already
-covers without further changes.
+---
 
-**Investigated and decided against — shortening the passive window
-to save time now that ARP covers completeness regardless:** tested
-live against the real network with a throwaway A/B harness (temporarily
-deployed over `attack-menu.sh`'s own path to reuse its scoped
-passwordless-sudo grant, then reverted) comparing a 10s and a 5s
-capture back-to-back. `arp-scan` alone found all 11 hosts in both
-cases (confirming completeness doesn't depend on the passive window at
-all anymore), but the *signal-strength data* did: 10s got a real dBm
-reading for 7 of the 11 devices, 5s only 5 — two devices (`-11dBm` and
-`-25dBm`) dropped out of airodump's capture entirely in the shorter
-window and would've shown `?` instead of their real signal. Since
-that signal reading is what the device list's sort order (and, by
-extension, a rough read on whether a deauth is likely to land) is
-based on, the full 10s was kept.
+### 24. Running a script under `sudo` leaves a root-owned `__pycache__` that breaks `rsync`/`git`/`rm` afterward
 
-### 25. `attack-menu.sh`'s screen-flicker (#23) doesn't have a fix within whiptail -- rewritten as `attack-tui.py`
+**Symptom:** `sync-pifi.sh` (running as a normal user) failed with `Permission denied` trying to delete one specific file: `scripts/pentest/__pycache__/*.pyc`.
 
-**Cause, confirmed in #23:** every `whiptail` invocation independently
-toggles the terminal's alternate-screen buffer (`\e[?1049h` on start,
-`\e[?1049l` on exit) -- with a *chain* of separate `whiptail` processes
-(one per screen), that toggle happens between every single one, which
-is what read as the UI "closing and reopening". There's no flag to
-make that buffer persistent across separate invocations.
+**Root cause:** `pifite.py` runs via `sudo`, i.e. as root. Python auto-writes a compiled bytecode cache the first time it runs a `.py` file, owned by whoever ran it -- root, in this case -- inside a directory (the repo checkout) otherwise owned by the normal user. Every non-root tool that later touches that directory (`rsync`, `git`, a plain `rm -rf`) then fails on that one file.
 
-**Fix:** `scripts/pentest/attack-tui.py`, a from-scratch curses
-rewrite kept *alongside* `attack-menu.sh` rather than replacing it --
-one `curses.wrapper()` for the whole program lifetime, entering/exiting
-the alternate screen exactly once total instead of once per screen.
-Confirmed directly the same way the original bug was confirmed:
-capturing the raw byte stream from a real `ssh -tt` run and counting
-`1049` occurrences -- exactly **one**, for a full network-scan →
-network-menu transition, versus one pair *per screen* in the bash
-version. Every external-tool invocation (`airodump-ng`, `aireplay-ng`,
-`arp-scan`, `tshark`, `nmap`, `nbtscan`, the OUI vendor lookup) and
-parsing rule is a faithful port of `attack-menu.sh`'s logic, run via
-`subprocess` -- not reimplemented from scratch -- so behavior doesn't
-drift between the two. Bonus, not the point but confirmed true:
-`curses.wrapper()` uses `cbreak()`, not `raw()`, so unlike `whiptail`
-it does NOT disable the terminal's interrupt character -- Ctrl+C
-generates a real `SIGINT` on every screen here, not just one.
+**Fix:** run with `python3 -B` wherever `pifite.py` is invoked as root (the `pifite` alias and the matching `/etc/sudoers.d/pifite-nopasswd` entry) -- stops the bytecode cache from being written at all. Not worth the cache anyway for a script this short-lived and run this rarely. Removed the existing stray root-owned cache once, by hand, after the fact.
 
-**A bug caught while building it, recorded since it's a generic
-pitfall:** `os.environ.setdefault("ESCDELAY", "25")` was originally
-set inside the function passed to `curses.wrapper()` -- but
-`curses.wrapper()` calls `initscr()` *before* invoking that function,
-and `initscr()` is when ncurses actually reads `ESCDELAY`. Setting it
-from inside the wrapped function is a silent no-op; it has to be set
-in the real environment before `curses.wrapper()` is ever called.
+**Takeaway:** any script that's sometimes run via `sudo` and sometimes not, inside a checkout a normal user also needs to write to, should use `-B` (or `PYTHONDONTWRITEBYTECODE=1`) -- the cache is never worth the ownership mismatch it creates.
 
-**Verifying interactive input (arrow keys, Enter, Ctrl+C, `q`) over
-SSH turned out to be its own rabbit hole, worth recording:** driving
-the TUI non-interactively via a FIFO piped into `ssh`'s stdin produced
-three separate misleading failures before landing on a real live test
-instead of chasing a fourth: (1) closing the FIFO's write end between
-sends produced an EOF that got misread as if the user had quit; (2)
-the sandboxed test shell's `ssh -tt` had `TERM=dumb`, under which
-arrow-key escape sequences have no keymap entry at all, so they were
-read as a lone Esc (quit) followed by two stray characters; (3) even
-with `TERM` fixed, `ssh` reading from a non-tty, non-EOF'd FIFO
-appears to buffer local stdin rather than forwarding it promptly --
-confirmed the FIFO mechanism itself was fine via a plain `cat` reader,
-but keys sent this way never reached the remote process at all
-(logged every `getch()` return value to confirm: consistently `-1`,
-i.e. never received). None of these were bugs in the script -- each
-was a test-harness artifact specific to scripting a pty-driven
-interactive program non-interactively through several extra hops.
-**Takeaway:** for anything that depends on real interactive keyboard
-timing into curses/whiptail/newt, a real terminal session beats
-synthetic input injection; don't sink more time into the latter once
-it's producing inconsistent results across otherwise-identical runs.
+---
 
-### 26. Device-discovery-completeness, round 2: `arp-scan` alone still misses devices `nmap -sn` catches
+### 25. A `NOPASSWD` sudoers rule stopped matching after renaming the script it pointed at
 
-**Symptom:** even after #24's fix (merging in whatever `arp-scan`
-found that the passive capture missed), the device list on a real home
-network still came up short against `sudo nmap -sn 10.0.0.0/24` --
-10 devices found via `attack` vs. 14 via `nmap`. Repeating both
-commands 5 times each showed `nmap -sn` finding 1-2 more devices than
-`arp-scan` on average, but not the *same* 1-2 extra devices each time.
+**Symptom:** `pifite` started prompting for a password again, with no other change to `sudoers` or the alias's *intent*.
 
-**Root cause:** the extra devices `nmap -sn` catches that `arp-scan`
-sometimes misses (and vice versa, occasionally) are power-saving
-smart-home devices (Tuya Smart plugs/bulbs, Espressif/ESP-based
-gadgets) whose WiFi radios cycle between asleep and briefly awake to
-check in with a cloud service, rather than staying continuously
-responsive. A single ARP/ping probe that lands outside a given
-device's brief awake window gets no reply -- confirmed this is
-inherent to the *devices*, not a difference in scanning technique:
-running the identical `nmap -sn` command repeatedly against an
-unchanged network gave different host counts (11-14) run to run, with
-no `arp-scan` involved at all.
+**Root cause:** `/etc/sudoers.d/pifite-nopasswd` grants `NOPASSWD` for one **exact, literal command line** -- `sudoers` does not match a command by path/basename alone, the full argument list has to match verbatim. Renaming `attack-tui.py` to `pifite.py` (and, separately, adding a `-B` flag to the invocation) each changed the actual command line the alias runs, silently leaving the old rule matching nothing.
 
-**Investigated and confirmed via a live A/B test** (5 runs each of
-`arp-scan` alone, `nmap -sn` alone, and both run concurrently with
-their MAC results unioned, against the real network): the combined
-approach was `>= max(arp, nmap)` in **every single run**, often
-strictly more than either alone (e.g. one run: arp=11, nmap=12,
-combined=14). Across all 5 runs, `arp-scan`'s and `nmap`'s own
-*best-possible* unions (needing 5 repeated runs each to reach) topped
-out at 13 devices each -- one **single** combined run routinely came
-within one device of that, and did so in one pass rather than five.
-Concurrent runtime (both processes started together, `nmap`'s own
-2-11s run mostly overlapping `arp-scan`'s ~2s one) measured at 3.9-6.3s
-total, not the sum of the two.
+**Fix:** update the `sudoers.d` file's command line to match exactly, every time the aliased command line itself changes -- verified each time with `sudo -l` (confirms the rule as parsed) and a real invocation (confirms it's actually passwordless, not just present).
 
-**Fix:** both `attack-menu.sh` and `attack-tui.py` now run `arp-scan`
-AND `nmap -sn` concurrently (not sequentially) for the same-network
-completeness pass, unioning their MAC→IP results (arp-scan's wins on
-overlap, arbitrary -- both are reporting the same live host either
-way). Started *before* the passive device-scan gauge, not after it
-(previously `arp-scan` ran once the gauge had already finished) --
-overlapping the two means the added completeness costs close to
-nothing in wall time, since `nmap`'s own runtime mostly fits inside
-the already-happening `SCANTIME_DEVICES`-second window instead of
-stacking additional time on top of it.
-
-Devices found this way still won't have a signal-strength reading (the
-passive capture never saw them), same "show `?`, sort to the bottom"
-handling from #24 covers that. This remains fundamentally
-probabilistic against the specific class of intermittently-sleeping
-devices involved -- no realistic amount of tuning makes a single scan
-window deterministic against a device that might simply not be awake
-during it -- but the measured data above shows one combined pass gets
-close to what repeated single-tool runs need several tries to match.
-
-### 27. Better network/device resolution: hidden SSIDs, more vendors, richer device names -- and a real hardware ceiling found along the way
-
-Four related improvements, requested together, covered here as one
-entry:
-
-**Hidden SSID resolution (passive only).** The network scan now also
-captures a pcap (`--output-format csv,pcap`, same as the device scan
-already did) and, after the scan, checks it for 802.11 **probe
-response** frames (`wlan.fc.type_subtype==0x05`) -- these are
-management frames, cleartext regardless of the target network's own
-encryption, so whenever a client happens to probe for a hidden network
-during the scan window, the AP's response reveals its real name.
-Purely passive -- nothing is transmitted to provoke this, it's
-whatever organically happened on the air. Ceiling: on a real scan (135
-networks), 70 stayed `<hidden>` -- most hidden networks simply have no
-client probing for them during any given ~25s window, and this is not
-worked around by scanning longer or more often; deliberately not
-extended into anything active (e.g. deauthing a client to force a
-reconnect/probe) since that's a materially different, more invasive
-technique than the rest of this passive-recon flow.
-
-**LANIP column.** airodump-ng's AP CSV output has a `LANIP` field --
-occasionally populated from cleartext broadcast traffic the AP itself
-sent that airodump happened to see, more often blank. Now parsed and
-shown; blank shows as `-`. Devices already had (and still show) their
-own IP from the existing arp-scan/nmap-sn discovery.
-
-**Vendor resolution: two independent OUI databases, not one.**
-`mac_vendors_bulk()` now falls back to nmap's own bundled
-`nmap-mac-prefixes` database for any prefix `ieee-data`'s `oui.txt`
-doesn't have (different, independently maintained source -- sometimes
-one has an entry the other doesn't). Ceiling that's NOT a database gap
-and can't be fixed by adding a third source: a locally-administered /
-randomized MAC (common on modern phones for privacy) was never tied to
-a real hardware vendor in the first place -- deliberately, by design
-of the address itself.
-
-**Richer device names, not just vendor brand -- with a hardware
-ceiling found while building it.** Previously, a device only got a
-real name (rather than falling back to its vendor, e.g. "Philips
-Lighting BV") from DHCP/mDNS/NetBIOS traffic sniffed from the TARGET
-network's own capture, which only ever works against an OPEN network
-(WPA/WPA2/WPA3 encrypts data frames). Two same-network-only additions,
-both running concurrently with everything else in `do_device_scan`
-(same reasoning as #26 -- close to zero added wall time):
-- A bulk `nbtscan` across the whole subnet in one pass (NetBIOS
-  computer names), joined against the MAC->IP map from #26's
-  discovery.
-- A short passive capture on **wlan0 itself** -- our own
-  already-authenticated LAN link, not the target network's -- for the
-  same DHCP/mDNS/NetBIOS traffic. This works regardless of the
-  TARGET network's encryption, since it never touches that network's
-  frames at all: broadcast/multicast chatter other devices send on
-  the same physical LAN anyway.
-
-Building the wlan0 capture surfaced two real bugs, both fixed, and one
-real hardware ceiling that's just been documented rather than "fixed":
-
-- **Bug:** the mDNS filter only checked `dns.qry.name` (resolution
-  *queries*). Confirmed on a real network that this misses a lot: a
-  Philips Hue bridge's periodic self-announcements ("Hue Bridge -
-  05AB3A._hue._tcp.local", far richer than "Philips Lighting BV") are
-  pure **response** packets, invisible to a query-only filter. Now
-  checks both `dns.qry.name` and `dns.resp.name`.
-- **Bug:** tshark's default field-joining comma-concatenates every
-  instance of a repeated field into one string per packet (e.g. every
-  PTR/SRV record in one mDNS packet) -- a value that happens to end in
-  ".local" could still come out as an unusable
-  `real.name.local,other,junk` blob. Fixed with `-E occurrence=f`
-  (first instance only). Also: a name starting with `_` is a bare
-  service-*type* query (e.g. a client asking "who offers
-  `_companion-link._tcp.local`?"), not an actual device identity --
-  filtered out rather than shown as a misleading pseudo-name.
-- **Hardware ceiling, not a bug:** the wlan0 capture is CPU-starved
-  when run concurrently with everything else this board is already
-  doing (arp-scan, nmap -sn, nbtscan, and the airodump-ng device scan
-  itself, all on one ARM11 core). Measured directly: the *same*
-  capture, run in isolation, caught 36 packets / 12KB in 15s and
-  correctly resolved a device name; run concurrently with the other
-  four operations, it caught as little as 380 bytes in the same
-  window and resolved nothing. Mitigated by giving it nearly the full
-  device-scan window (`SCANTIME_DEVICES - 1`, not a fixed short
-  duration) rather than eliminated -- there's a real limit to how much
-  this single-core board can do at once, and this capture is the one
-  most exposed to losing that contention. When it does catch
-  something, the name is often much richer than a plain vendor lookup
-  (device model/product name, not just manufacturer).
-
-`SCANTIME_DEVICES` raised from 10s to 15s (requested alongside these)
--- also gives the concurrent discovery work (especially the
-CPU-starved wlan0 capture above) more of a window to work with.
-
-**Follow-up after real-world use turned up two more gaps:**
-
-1. **Network list showed no IPs at all.** Root cause: airodump's
-   `LANIP` field needs to catch the AP's own *cleartext* broadcast
-   traffic to populate -- on any WPA/WPA2/WPA3 network (i.e. nearly
-   everything), even the AP's own broadcasts are encrypted, so this
-   essentially never resolves passively (confirmed: 0 of 135 networks
-   on a real scan). Not something more scan time or a smarter filter
-   fixes -- it's not visible to a passive listener at all on an
-   encrypted network, full stop. Fix: for whichever *one* network
-   `wlan0` is actually connected to, its real gateway IP is already
-   known directly (`ip route show default`) -- no monitoring involved,
-   fully reliable. Every other network in the list genuinely has no IP
-   obtainable this way; we're not a member of them.
-
-2. **The wlan0 capture's CPU starvation (documented above as a
-   "ceiling") turned out to be more fixable than first concluded.**
-   Real-world testing after the above still showed 0 devices getting a
-   real name. Root cause, more precisely: five things compete for this
-   board's one ARM11 core at once (arp-scan, nmap -sn, nbtscan, the
-   wlan0 capture, and the airodump-ng device scan itself) with equal
-   OS scheduling priority, and the wlan0 capture -- unlike the other
-   three, which just run a bit slower under contention -- can lose
-   entire packets outright when starved of CPU time at the wrong
-   moment. Fix: `nice -n 10` on the three lighter helpers (arp-scan,
-   nmap, nbtscan -- they matter less if delayed) and `nice -n -10` on
-   the wlan0 capture (it's the one that matters). Verified live,
-   against the same real contended flow that previously resolved
-   nothing: the Hue bridge from the earlier example now reliably
-   resolves to "Hue Bridge - 05AB3A" even with everything else running
-   at once, not just in an isolated/uncontended test.
+**Takeaway:** a `NOPASSWD` entry and the alias/script it exempts have to be treated as one unit that changes together -- renaming a script or adjusting its flags is a two-file change (the alias, and the sudoers rule), not one.

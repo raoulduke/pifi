@@ -258,89 +258,105 @@ session:
   update the alias without opening a session.
 - `scripts/pentest/set-alfa-mode.sh monitor|managed` — flip the Alfa's mode
   without touching `wlan0`/SSH reachability.
-- `scripts/pentest/attack-tui.py` (run on the Pi itself, `sudo` —
-  aliased to `attack` in the Pi's own `~/.bash_aliases`) — interactive
-  arrow-key menu, structured as three nested screens you can back out
-  of at any level without re-scanning:
+- `scripts/pentest/pifite.py` — a persistent curses TUI, run on the Pi
+  itself as `pifite` (a `~/.bash_aliases` entry for
+  `sudo python3 -B ~/pifi/scripts/pentest/pifite.py`, matched exactly —
+  `-B` included, since sudoers matches the whole command line literally
+  — by a `NOPASSWD` entry in `/etc/sudoers.d/pifite-nopasswd`, so it
+  never prompts for a password). `-B` stops Python writing a
+  `__pycache__/*.pyc`: running as root, that cache would otherwise be
+  root-owned inside an otherwise `kali`-owned checkout, breaking
+  `rsync`/`git`/`rm` for anything non-root afterward.
 
-  > A curses rewrite of this tool's original `whiptail`-based UI
-  > (`attack-menu.sh` — removed; full history in
-  > `docs/TROUBLESHOOTING.md`), built to fix a real limitation
-  > `whiptail` couldn't be worked around within: every `whiptail`
-  > screen briefly closed and reopened the terminal (confirmed via the
-  > raw byte stream — see `docs/TROUBLESHOOTING.md` #23/#25), since
-  > each separate `whiptail` invocation toggles the terminal's
-  > alternate-screen buffer on its own. The curses version holds the
-  > screen continuously for the whole session instead — confirmed, same
-  > way, to toggle it exactly once. It also doesn't disable the
-  > terminal's interrupt character the way `whiptail` did, so Ctrl+C
-  > works on every screen here, not just the live deauth view.
-  1. **Networks**, from a scan (2.4GHz + 5GHz, live progress gauge)
-     sorted strongest signal first, showing signal strength, name,
-     encryption, and band (not MAC/channel — not useful to look at
-     here).
-  2. **Devices** connected to the picked network, from a second scan,
-     sorted strongest signal first and labeled with a resolved device
-     name/vendor plus signal strength (the one per-device factor that
-     affects whether an injected deauth frame reliably reaches it —
-     RF path loss is roughly symmetric). A `Back` entry returns to the
-     network list instantly, reusing the already-scanned results. If
-     the network is WPA3, a warning is shown here: WPA3 mandates
-     Protected Management Frames, which cryptographically authenticate
-     deauth frames — compliant clients ignore forged ones regardless of
-     signal, so deauth is unlikely to work at all against anything on
-     such a network (this is a network-wide fact, unlike signal
-     strength, so it's a warning rather than something to sort by).
-  3. **Device info**, once you pick a device: every discovered detail
-     (MAC, vendor, resolved name, signal, packet count, probed SSIDs),
-     plus `Send Deauth` and a `Back` to the device list. Deauth runs as
-     a plain full-screen view (this image's `whiptail` 0.52.25 has no
-     `--timeout` flag, so a dialog can't both auto-refresh and take a
-     button press) redrawn every second with elapsed time and a
-     best-effort "still active / likely dropped" status, based on
-     whether the device keeps appearing in a live concurrent capture —
-     not a guaranteed disconnect signal. `q` + Enter stops it.
+  Opens on a banner main menu, just a numbered name per item (`1)
+  Network discovery`, `2) Deauth attack`) — arrow keys move, Enter
+  selects, and so does typing a row's own number directly (a
+  single-digit menu like this one selects the instant you press the
+  digit; a longer numbered list, like the network/device lists below,
+  briefly buffers a multi-digit number so `14` doesn't jump to row `1`
+  the moment you type the first digit).
+  1. **Network discovery** — scans (2.4GHz + 5GHz) and shows results
+     live, as they're actually found, sorted strongest signal first
+     (signal, name, encryption, band) with a real countdown to when
+     the scan ends — not a static duration or percent bar. Press `s`
+     to save the list to disk — an attack picks from that saved list
+     instead of scanning itself, so re-running discovery and saving
+     again is how you refresh it. Esc discards the scan and returns to
+     the main menu without saving. The saved list is removed
+     automatically when `pifite` exits (normally, Ctrl+C, or `kill`) —
+     a fresh run always starts with nothing saved.
+  2. **Deauth attack** (more attacks can be added the same way later)
+     — picks a network from the saved list (prompts to run discovery
+     first if nothing's saved yet), then scans that network for
+     connected devices, again shown live by MAC/signal as they're
+     found. When on the same network as `wlan0`, this scan runs
+     several things concurrently (see below), each shown as its own
+     step with its own status — a real countdown for anything with a
+     known ceiling, `done` the instant that step's own process
+     actually exits (not just a clock guess), or `skipped` if it
+     doesn't apply this run:
+     ```
+     Steps:
+       [ 12s left]  Passive device scan (airodump)
+       [     done]  ARP scan (arp-scan)
+       [  6s left]  Ping sweep (nmap -sn)
+       [     done]  NetBIOS scan (nbtscan)
+       [  9s left]  wlan0 name capture (mDNS/DHCP/NetBIOS)
+     ```
+     Once the scan ends, vendor/name resolution runs (shown as one
+     more brief step) and the enriched, fully-labeled device list
+     appears (signal, IP, resolved name/vendor — see below for how).
+     Picking a device shows every discovered detail (MAC, vendor,
+     resolved name, signal, packet count, probed SSIDs) with a `Send
+     Deauth` action. If the network is WPA3, a warning is shown: WPA3
+     mandates Protected Management Frames, which cryptographically
+     authenticate deauth frames, so compliant clients ignore forged
+     ones regardless of signal — deauth is unlikely to work at all
+     against anything on such a network. Deauth itself runs as a live
+     view, redrawn every second with elapsed time and a best-effort
+     "still active / likely dropped" status based on whether the
+     device keeps appearing in a concurrent capture — not a guaranteed
+     disconnect signal. `q` or Ctrl+C stops it and returns to the
+     device list.
 
-  Uses `whiptail` rather than `fzf` — see
-  [TROUBLESHOOTING.md #16](TROUBLESHOOTING.md) for why. Device
-  identification is passive-only by default: MAC vendor and previously
-  probed SSIDs are always available (cleartext 802.11 management
-  frames), but a DHCP/mDNS/NetBIOS device name only resolves on an
-  *open* network — WPA/WPA2 encrypts data frames, and no attempt is
-  made to obtain or crack a passphrase to get past that. Passive
-  capture alone only catches a device if it happens to transmit during
-  the scan window — an idle device is invisible to it regardless of
-  how long that window is. If `wlan0` happens to be a genuine,
-  associated member of the *same* network being scanned (auto-detected
-  by comparing `wlan0`'s current SSID to the selected one), an ARP scan
-  fills that gap: any device it finds that the passive capture missed
-  is added to the list too (just without a signal-strength reading,
-  since airodump never saw it) — this is what gets the device list to
-  actually match what e.g. `nmap -sn` on the same subnet would show.
+  Every screen supports Ctrl+C (a real `SIGINT`, since curses leaves
+  the terminal's interrupt character alone) as well as Esc/`q` to back
+  out one level; either way, an exit path kills every spawned
+  `airodump-ng`/`aireplay-ng`/`nmap` child so nothing's left running as
+  an orphan.
+
+  Device identification is passive-only by default: MAC vendor and
+  previously probed SSIDs are always available (cleartext 802.11
+  management frames), but a DHCP/mDNS/NetBIOS device name only
+  resolves on an *open* network — WPA/WPA2 encrypts data frames, and no
+  attempt is made to obtain or crack a passphrase to get past that.
+  Passive capture alone only catches a device if it happens to
+  transmit during the scan window — an idle device is invisible to it
+  regardless of how long that window is. If `wlan0` happens to be a
+  genuine, associated member of the *same* network being scanned
+  (auto-detected by comparing `wlan0`'s current SSID to the selected
+  one), an ARP scan plus `nmap -sn` fill that gap: any device either
+  finds that the passive capture missed is added to the list too (just
+  without a signal-strength reading, since airodump never saw it).
   Being on the same network additionally unlocks, per selected device:
-  active `nmap -O` OS-family
-  fingerprinting, `nbtscan`, and — for actual **model and version**
-  info, not just OS family — the `upnp-info` and `dns-service-discovery`
-  NSE scripts (both ship with `nmap` itself, nothing extra to install).
-  Many consumer/IoT devices actively broadcast their exact model this
-  way: a Chromecast's mDNS `_googlecast._tcp` record includes its
-  literal model string, and UPnP/SSDP device descriptions often include
+  active `nmap -O` OS-family fingerprinting, `nbtscan`, and — for
+  actual **model and version** info, not just OS family — the
+  `upnp-info` and `dns-service-discovery` NSE scripts (both ship with
+  `nmap` itself, nothing extra to install). Many consumer/IoT devices
+  actively broadcast their exact model this way: a Chromecast's mDNS
+  `_googlecast._tcp` record includes its literal model string, and
+  UPnP/SSDP device descriptions often include
   `manufacturer`/`modelName`/`modelNumber`/`serialNumber` directly. All
   of this works regardless of the WiFi link's own encryption, since
   being an authenticated LAN member doesn't depend on decrypting the
-  radio traffic at all. Ctrl+C only actually works on the live deauth
-  view (`q` also works there) and at a plain shell prompt — it does
-  **not** work on any `whiptail` screen (network/device menus, scan
-  gauges, device-info), on any client, because `whiptail` disables the
-  terminal's interrupt character the instant it takes the screen (see
-  `docs/TROUBLESHOOTING.md` #22/#23). Use Esc/Back/Cancel to back out of
-  a menu or device-info screen instead — that works fine, since it's a
-  plain keypress `whiptail` reads itself rather than something relying
-  on the (disabled) interrupt character. Scan gauges have no
-  interactive escape at all right now; a scan has to run to completion.
-  Wherever Ctrl+C or Back/Cancel *does* end the script, an exit trap
-  kills every spawned `airodump-ng`/`aireplay-ng`/`nmap` child so
-  nothing is left running as an orphan.
+  radio traffic at all. A vendor name that's actually a chip/platform
+  supplier rather than a device brand (`Espressif Inc.`, `Tuya Smart
+  Inc.`) is annotated with the device category that usually means
+  (`(IoT/smart-home device)`, `(smart-home IoT)`) — a real device OEM
+  like `Vantiva USA LLC` (routers/gateways/set-top boxes) gets a more
+  specific hint (`(router/gateway)`) since that vendor string is a much
+  stronger signal than a chip supplier embedded in thousands of
+  unrelated white-label products.
 - Write session notes into `pentest-logs/` as you go.
 
 ### Laptop-side shell aliases

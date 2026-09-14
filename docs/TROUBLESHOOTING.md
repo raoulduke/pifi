@@ -1020,3 +1020,35 @@ real hardware ceiling that's just been documented rather than "fixed":
 `SCANTIME_DEVICES` raised from 10s to 15s (requested alongside these)
 -- also gives the concurrent discovery work (especially the
 CPU-starved wlan0 capture above) more of a window to work with.
+
+**Follow-up after real-world use turned up two more gaps:**
+
+1. **Network list showed no IPs at all.** Root cause: airodump's
+   `LANIP` field needs to catch the AP's own *cleartext* broadcast
+   traffic to populate -- on any WPA/WPA2/WPA3 network (i.e. nearly
+   everything), even the AP's own broadcasts are encrypted, so this
+   essentially never resolves passively (confirmed: 0 of 135 networks
+   on a real scan). Not something more scan time or a smarter filter
+   fixes -- it's not visible to a passive listener at all on an
+   encrypted network, full stop. Fix: for whichever *one* network
+   `wlan0` is actually connected to, its real gateway IP is already
+   known directly (`ip route show default`) -- no monitoring involved,
+   fully reliable. Every other network in the list genuinely has no IP
+   obtainable this way; we're not a member of them.
+
+2. **The wlan0 capture's CPU starvation (documented above as a
+   "ceiling") turned out to be more fixable than first concluded.**
+   Real-world testing after the above still showed 0 devices getting a
+   real name. Root cause, more precisely: five things compete for this
+   board's one ARM11 core at once (arp-scan, nmap -sn, nbtscan, the
+   wlan0 capture, and the airodump-ng device scan itself) with equal
+   OS scheduling priority, and the wlan0 capture -- unlike the other
+   three, which just run a bit slower under contention -- can lose
+   entire packets outright when starved of CPU time at the wrong
+   moment. Fix: `nice -n 10` on the three lighter helpers (arp-scan,
+   nmap, nbtscan -- they matter less if delayed) and `nice -n -10` on
+   the wlan0 capture (it's the one that matters). Verified live,
+   against the same real contended flow that previously resolved
+   nothing: the Hue bridge from the earlier example now reliably
+   resolves to "Hue Bridge - 05AB3A" even with everything else running
+   at once, not just in an isolated/uncontended test.

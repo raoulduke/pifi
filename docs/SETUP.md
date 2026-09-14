@@ -262,6 +262,21 @@ session:
   to `attack` in the Pi's own `~/.bashrc`) — interactive arrow-key menu,
   structured as three nested screens you can back out of at any level
   without re-scanning:
+
+  > **Alternative:** `scripts/pentest/attack-tui.py` (`sudo python3
+  > scripts/pentest/attack-tui.py`) is a from-scratch curses rewrite of
+  > this same tool, built to fix a real limitation `whiptail` can't be
+  > worked around within: every `whiptail` screen briefly closes and
+  > reopens the terminal (confirmed via the raw byte stream — see
+  > `docs/TROUBLESHOOTING.md` #23/#25), since each separate `whiptail`
+  > invocation toggles the terminal's alternate-screen buffer on its
+  > own. The curses version holds the screen continuously for the whole
+  > session instead — confirmed, same way, to toggle it exactly once.
+  > It also doesn't disable the terminal's interrupt character the way
+  > `whiptail` does, so Ctrl+C works on every screen there, not just the
+  > live deauth view. Kept alongside `attack-menu.sh` (the `attack`
+  > alias still points at the bash version) until it's had more
+  > real-world use.
   1. **Networks**, from a scan (2.4GHz + 5GHz, live progress gauge)
      sorted strongest signal first, showing signal strength, name,
      encryption, and band (not MAC/channel — not useful to look at

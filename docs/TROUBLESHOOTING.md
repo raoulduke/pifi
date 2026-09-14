@@ -809,3 +809,59 @@ window and would've shown `?` instead of their real signal. Since
 that signal reading is what the device list's sort order (and, by
 extension, a rough read on whether a deauth is likely to land) is
 based on, the full 10s was kept.
+
+### 25. `attack-menu.sh`'s screen-flicker (#23) doesn't have a fix within whiptail -- rewritten as `attack-tui.py`
+
+**Cause, confirmed in #23:** every `whiptail` invocation independently
+toggles the terminal's alternate-screen buffer (`\e[?1049h` on start,
+`\e[?1049l` on exit) -- with a *chain* of separate `whiptail` processes
+(one per screen), that toggle happens between every single one, which
+is what read as the UI "closing and reopening". There's no flag to
+make that buffer persistent across separate invocations.
+
+**Fix:** `scripts/pentest/attack-tui.py`, a from-scratch curses
+rewrite kept *alongside* `attack-menu.sh` rather than replacing it --
+one `curses.wrapper()` for the whole program lifetime, entering/exiting
+the alternate screen exactly once total instead of once per screen.
+Confirmed directly the same way the original bug was confirmed:
+capturing the raw byte stream from a real `ssh -tt` run and counting
+`1049` occurrences -- exactly **one**, for a full network-scan →
+network-menu transition, versus one pair *per screen* in the bash
+version. Every external-tool invocation (`airodump-ng`, `aireplay-ng`,
+`arp-scan`, `tshark`, `nmap`, `nbtscan`, the OUI vendor lookup) and
+parsing rule is a faithful port of `attack-menu.sh`'s logic, run via
+`subprocess` -- not reimplemented from scratch -- so behavior doesn't
+drift between the two. Bonus, not the point but confirmed true:
+`curses.wrapper()` uses `cbreak()`, not `raw()`, so unlike `whiptail`
+it does NOT disable the terminal's interrupt character -- Ctrl+C
+generates a real `SIGINT` on every screen here, not just one.
+
+**A bug caught while building it, recorded since it's a generic
+pitfall:** `os.environ.setdefault("ESCDELAY", "25")` was originally
+set inside the function passed to `curses.wrapper()` -- but
+`curses.wrapper()` calls `initscr()` *before* invoking that function,
+and `initscr()` is when ncurses actually reads `ESCDELAY`. Setting it
+from inside the wrapped function is a silent no-op; it has to be set
+in the real environment before `curses.wrapper()` is ever called.
+
+**Verifying interactive input (arrow keys, Enter, Ctrl+C, `q`) over
+SSH turned out to be its own rabbit hole, worth recording:** driving
+the TUI non-interactively via a FIFO piped into `ssh`'s stdin produced
+three separate misleading failures before landing on a real live test
+instead of chasing a fourth: (1) closing the FIFO's write end between
+sends produced an EOF that got misread as if the user had quit; (2)
+the sandboxed test shell's `ssh -tt` had `TERM=dumb`, under which
+arrow-key escape sequences have no keymap entry at all, so they were
+read as a lone Esc (quit) followed by two stray characters; (3) even
+with `TERM` fixed, `ssh` reading from a non-tty, non-EOF'd FIFO
+appears to buffer local stdin rather than forwarding it promptly --
+confirmed the FIFO mechanism itself was fine via a plain `cat` reader,
+but keys sent this way never reached the remote process at all
+(logged every `getch()` return value to confirm: consistently `-1`,
+i.e. never received). None of these were bugs in the script -- each
+was a test-harness artifact specific to scripting a pty-driven
+interactive program non-interactively through several extra hops.
+**Takeaway:** for anything that depends on real interactive keyboard
+timing into curses/whiptail/newt, a real terminal session beats
+synthetic input injection; don't sink more time into the latter once
+it's producing inconsistent results across otherwise-identical runs.

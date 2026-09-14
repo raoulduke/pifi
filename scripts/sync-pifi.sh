@@ -23,4 +23,9 @@ if [[ -z "${ip}" ]] || ! timeout 3 bash -c "echo > /dev/tcp/${ip}/22" 2>/dev/nul
   ip=$(awk '/^Host pifi$/{f=1} f && /HostName/{print $2; exit}' "${SSH_CONFIG}")
 fi
 
-rsync -avz --exclude='.git' --delete "${REPO_DIR}/" "kali@${ip}:~/pifi/"
+# __pycache__/*.pyc excluded alongside .git -- attack-tui.py (Python)
+# means a local `python3 -m py_compile` before syncing leaves one of
+# these behind, and without an explicit exclude here it gets shipped
+# to the Pi too (rsync only respects .gitignore for what IT tracks,
+# not for what it's asked to sync).
+rsync -avz --exclude='.git' --exclude='__pycache__' --exclude='*.pyc' --delete --delete-excluded "${REPO_DIR}/" "kali@${ip}:~/pifi/"

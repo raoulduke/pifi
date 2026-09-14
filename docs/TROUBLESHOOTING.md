@@ -865,3 +865,57 @@ interactive program non-interactively through several extra hops.
 timing into curses/whiptail/newt, a real terminal session beats
 synthetic input injection; don't sink more time into the latter once
 it's producing inconsistent results across otherwise-identical runs.
+
+### 26. Device-discovery-completeness, round 2: `arp-scan` alone still misses devices `nmap -sn` catches
+
+**Symptom:** even after #24's fix (merging in whatever `arp-scan`
+found that the passive capture missed), the device list on a real home
+network still came up short against `sudo nmap -sn 10.0.0.0/24` --
+10 devices found via `attack` vs. 14 via `nmap`. Repeating both
+commands 5 times each showed `nmap -sn` finding 1-2 more devices than
+`arp-scan` on average, but not the *same* 1-2 extra devices each time.
+
+**Root cause:** the extra devices `nmap -sn` catches that `arp-scan`
+sometimes misses (and vice versa, occasionally) are power-saving
+smart-home devices (Tuya Smart plugs/bulbs, Espressif/ESP-based
+gadgets) whose WiFi radios cycle between asleep and briefly awake to
+check in with a cloud service, rather than staying continuously
+responsive. A single ARP/ping probe that lands outside a given
+device's brief awake window gets no reply -- confirmed this is
+inherent to the *devices*, not a difference in scanning technique:
+running the identical `nmap -sn` command repeatedly against an
+unchanged network gave different host counts (11-14) run to run, with
+no `arp-scan` involved at all.
+
+**Investigated and confirmed via a live A/B test** (5 runs each of
+`arp-scan` alone, `nmap -sn` alone, and both run concurrently with
+their MAC results unioned, against the real network): the combined
+approach was `>= max(arp, nmap)` in **every single run**, often
+strictly more than either alone (e.g. one run: arp=11, nmap=12,
+combined=14). Across all 5 runs, `arp-scan`'s and `nmap`'s own
+*best-possible* unions (needing 5 repeated runs each to reach) topped
+out at 13 devices each -- one **single** combined run routinely came
+within one device of that, and did so in one pass rather than five.
+Concurrent runtime (both processes started together, `nmap`'s own
+2-11s run mostly overlapping `arp-scan`'s ~2s one) measured at 3.9-6.3s
+total, not the sum of the two.
+
+**Fix:** both `attack-menu.sh` and `attack-tui.py` now run `arp-scan`
+AND `nmap -sn` concurrently (not sequentially) for the same-network
+completeness pass, unioning their MAC→IP results (arp-scan's wins on
+overlap, arbitrary -- both are reporting the same live host either
+way). Started *before* the passive device-scan gauge, not after it
+(previously `arp-scan` ran once the gauge had already finished) --
+overlapping the two means the added completeness costs close to
+nothing in wall time, since `nmap`'s own runtime mostly fits inside
+the already-happening `SCANTIME_DEVICES`-second window instead of
+stacking additional time on top of it.
+
+Devices found this way still won't have a signal-strength reading (the
+passive capture never saw them), same "show `?`, sort to the bottom"
+handling from #24 covers that. This remains fundamentally
+probabilistic against the specific class of intermittently-sleeping
+devices involved -- no realistic amount of tuning makes a single scan
+window deterministic against a device that might simply not be awake
+during it -- but the measured data above shows one combined pass gets
+close to what repeated single-tool runs need several tries to match.

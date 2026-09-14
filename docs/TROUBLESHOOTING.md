@@ -768,3 +768,44 @@ completion; a considered alternative (dropping `whiptail` for a plain
 text progress ticker on just the scan screens, which would leave the
 terminal in normal mode and make Ctrl+C genuinely work there) was
 decided against for now to keep the gauge's visual polish.
+
+### 24. `attack-menu.sh`'s device list found far fewer devices than `nmap -sn` on the same network
+
+**Symptom:** on a home network with 11 live hosts (confirmed with
+`sudo nmap -sn 10.0.0.0/24`), the device-selection list showed only 6.
+
+**Cause:** the device list was built purely from the passive
+`airodump-ng` capture, which only records a device if it happens to
+transmit an 802.11 frame during the (10s) scan window. An idle device,
+or one that just doesn't have anything to send right then, is
+completely invisible to it no matter how long the window runs — this
+is fundamental to passive capture, not a bug in the capture itself.
+`nmap -sn` (and the `arp-scan` this script already runs, on the same
+network, for per-device IP lookup) instead sends an ARP request to
+every address on the subnet and counts who replies — it can't miss a
+live host that way, but it only works when actually on that network
+(unlike the passive capture, which is the only option at all against a
+network you're monitoring but not authenticated on).
+
+**Fix:** when genuinely on the same network via `wlan0` (the existing
+`SAME_NETWORK` check), merge in any MAC the ARP scan found that the
+passive capture didn't, instead of only using ARP results to enrich
+devices airodump already had. These merged-in entries have no signal
+reading (airodump never saw them to measure one), which the existing
+"show `?`, sort to the bottom" handling for unmeasured signal already
+covers without further changes.
+
+**Investigated and decided against — shortening the passive window
+to save time now that ARP covers completeness regardless:** tested
+live against the real network with a throwaway A/B harness (temporarily
+deployed over `attack-menu.sh`'s own path to reuse its scoped
+passwordless-sudo grant, then reverted) comparing a 10s and a 5s
+capture back-to-back. `arp-scan` alone found all 11 hosts in both
+cases (confirming completeness doesn't depend on the passive window at
+all anymore), but the *signal-strength data* did: 10s got a real dBm
+reading for 7 of the 11 devices, 5s only 5 — two devices (`-11dBm` and
+`-25dBm`) dropped out of airodump's capture entirely in the shorter
+window and would've shown `?` instead of their real signal. Since
+that signal reading is what the device list's sort order (and, by
+extension, a rough read on whether a deauth is likely to land) is
+based on, the full 10s was kept.

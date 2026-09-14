@@ -294,11 +294,18 @@ session:
   probed SSIDs are always available (cleartext 802.11 management
   frames), but a DHCP/mDNS/NetBIOS device name only resolves on an
   *open* network — WPA/WPA2 encrypts data frames, and no attempt is
-  made to obtain or crack a passphrase to get past that. If `wlan0`
-  happens to be a genuine, associated member of the *same* network
-  being scanned (auto-detected by comparing `wlan0`'s current SSID to
-  the selected one), the device-info screen additionally runs an ARP
-  scan plus, per selected device: active `nmap -O` OS-family
+  made to obtain or crack a passphrase to get past that. Passive
+  capture alone only catches a device if it happens to transmit during
+  the scan window — an idle device is invisible to it regardless of
+  how long that window is. If `wlan0` happens to be a genuine,
+  associated member of the *same* network being scanned (auto-detected
+  by comparing `wlan0`'s current SSID to the selected one), an ARP scan
+  fills that gap: any device it finds that the passive capture missed
+  is added to the list too (just without a signal-strength reading,
+  since airodump never saw it) — this is what gets the device list to
+  actually match what e.g. `nmap -sn` on the same subnet would show.
+  Being on the same network additionally unlocks, per selected device:
+  active `nmap -O` OS-family
   fingerprinting, `nbtscan`, and — for actual **model and version**
   info, not just OS family — the `upnp-info` and `dns-service-discovery`
   NSE scripts (both ship with `nmap` itself, nothing extra to install).

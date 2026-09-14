@@ -695,13 +695,76 @@ Every other screen's `whiptail` call was only ever checked with a bare
 130 for `SIGINT`) from an ordinary Cancel/Esc button (1/255) — both
 fell into the same "go back" branch.
 
-**Fix:** added `is_interrupted()` (checks for an exit code `>= 128`)
-and call it after every `whiptail` invocation and after the scan
-gauge's own pipeline (`PIPESTATUS[1]`, since the gauge's exit code is
-otherwise never inspected at all) — an interrupted one now kills any
+**Fix attempted:** added `is_interrupted()` (checks for an exit code
+`>= 128`) and call it after every `whiptail` invocation and after the
+scan gauge's own pipeline (`PIPESTATUS[1]`, since the gauge's exit code
+is otherwise never inspected at all) — an interrupted one now kills any
 still-running background scan and `exit`s the whole script instead of
 falling through to Back/Cancel handling. Also moved `run_deauth()`'s
 per-session scratch dir (`monwork`) into a global (`MONWORK`) so the
 top-level `EXIT` trap can remove it even when Ctrl+C terminates the
 script straight out of the deauth loop, skipping that function's own
 post-loop `rm -rf` entirely.
+
+**This fix turned out to be incomplete/beside the point — see #23.**
+The reasoning above about process groups is correct as far as it goes,
+but there's a more fundamental blocker underneath it that this fix
+doesn't address: keeping `is_interrupted()` and `MONWORK` anyway, since
+neither is wrong, just insufficient on its own (`is_interrupted()` in
+particular is now dead code for the whiptail-dialog case specifically —
+see #23 for why — but harmless, and still correct for a process that's
+genuinely signal-killed some other way).
+
+### 23. `attack-menu.sh`: ...and the real reason Ctrl+C still didn't work, even after #22's fix
+
+**Symptom:** after deploying #22's fix, Ctrl+C *still* did nothing on
+any `whiptail` screen (network/device menus, scan gauges, device-info)
+— confirmed on a real device (Pixel 3 + Termux) over several rounds of
+testing, including after ruling out `sudo`'s `Defaults use_pty` (which
+really does create a second, nested pty for the command — confirmed
+with `ps` showing two separate `sudo` processes on two separate
+`pts/N` devices — a very plausible-looking suspect, but proven not the
+cause: a directly-sent `SIGINT` to the right process group killed the
+whole nested tree just fine even through that nesting).
+
+**Investigation:** every test using `kill -INT <pgid>` from a second
+SSH session — simulating what a terminal's Ctrl+C does — showed the
+script terminating correctly, cleanup and all. That was the misleading
+part: `kill -INT` delivers the signal directly via syscall, which
+works regardless of terminal state, so it could never have caught the
+real bug. The actual test that mattered was checking the terminal's
+own settings live with `stty -a` while a real run was in progress:
+
+```
+# Before any whiptail dialog:
+intr = ^C; ... isig icanon iexten echo ...
+
+# The instant whiptail takes the screen (gauge OR menu -- checked both):
+intr = <undef>; ... isig -icanon -iexten -echo ...
+```
+
+`isig` (the terminal mode that turns special characters into signals)
+is still nominally on, but `intr` — the character bound to generating
+`SIGINT` — has been explicitly unbound. With no character bound to it,
+**no keypress can generate `SIGINT` at all** while `whiptail` owns the
+terminal. This is `newt` (the library behind `whiptail`) taking over
+raw keyboard handling for its own dialogs, deliberately clearing the
+interrupt binding so it can interpret every keystroke itself (this is
+exactly how Esc-as-Cancel already works — Esc is a plain byte `newt`
+reads and acts on in its own input loop, not something signal-based).
+It's inherent to `whiptail`/`newt`, true on any client (phone SSH app,
+laptop terminal, tmux, anything), and not something this script's own
+code can override or work around while a dialog is showing.
+
+**Conclusion / fix:** documented rather than "fixed" — see the Ctrl+C
+note near the top of `attack-menu.sh` and in `docs/SETUP.md`. Ctrl+C
+genuinely only works on the live deauth view (which never uses
+`whiptail` — its polling loop is a plain `read` builtin, so the
+terminal stays in normal mode) and at an ordinary shell prompt. Esc
+already works to back out of any menu/device-info/yes-no screen. Scan
+gauges (`whiptail --gauge`) have no interactive escape at all right
+now — `--gauge` takes no keyboard input, period — a scan has to run to
+completion; a considered alternative (dropping `whiptail` for a plain
+text progress ticker on just the scan screens, which would leave the
+terminal in normal mode and make Ctrl+C genuinely work there) was
+decided against for now to keep the gauge's visual polish.

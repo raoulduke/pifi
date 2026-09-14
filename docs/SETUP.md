@@ -308,12 +308,19 @@ session:
   `manufacturer`/`modelName`/`modelNumber`/`serialNumber` directly. All
   of this works regardless of the WiFi link's own encryption, since
   being an authenticated LAN member doesn't depend on decrypting the
-  radio traffic at all. Ctrl+C works from *any* screen (network/device
-  menus, scan gauges, device-info, or the live deauth view — not just
-  `q`/Back on that last one) and always stops the whole script rather
-  than just backing out one level; an exit trap kills every spawned
-  `airodump-ng`/`aireplay-ng`/`nmap` child so nothing is left running
-  as an orphan.
+  radio traffic at all. Ctrl+C only actually works on the live deauth
+  view (`q` also works there) and at a plain shell prompt — it does
+  **not** work on any `whiptail` screen (network/device menus, scan
+  gauges, device-info), on any client, because `whiptail` disables the
+  terminal's interrupt character the instant it takes the screen (see
+  `docs/TROUBLESHOOTING.md` #22/#23). Use Esc/Back/Cancel to back out of
+  a menu or device-info screen instead — that works fine, since it's a
+  plain keypress `whiptail` reads itself rather than something relying
+  on the (disabled) interrupt character. Scan gauges have no
+  interactive escape at all right now; a scan has to run to completion.
+  Wherever Ctrl+C or Back/Cancel *does* end the script, an exit trap
+  kills every spawned `airodump-ng`/`aireplay-ng`/`nmap` child so
+  nothing is left running as an orphan.
 - Write session notes into `pentest-logs/` as you go.
 
 ### Laptop-side shell aliases

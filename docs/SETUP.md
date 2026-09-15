@@ -160,6 +160,18 @@ relying on it somewhere without a laptop to fall back on:
   (private repo).
 - `scripts/pentest/set-alfa-mode.sh monitor|managed` — flip the Alfa's
   mode without touching `wlan0`/SSH reachability.
+- `scripts/pentest/switch-network.sh` — forces `wlan0` to switch to
+  whichever saved network profile is both actually in range and
+  highest-priority (`wpa_supplicant` only re-evaluates priority when it
+  disconnects on its own, so it won't preempt an already-working
+  lower-priority link by itself — e.g. flipping on a phone's hotspot
+  while the Pi is still happily on home WiFi). No SSID to specify —
+  shows each in-range candidate's details, highest-priority first, and
+  confirms before actually switching (declining or a real connection
+  failure moves on to the next one). Run on the Pi as `hotspot`
+  (aliased to `sudo ~/pifi/scripts/pentest/switch-network.sh` in
+  `~/.bash_aliases`, alongside `pifite` — shows up in the `pi-tail
+  aliases & functions` login banner).
 - `scripts/pentest/update-oui-master.sh` — refreshes `pifite`'s
   third-tier OUI vendor database (run on the Pi, needs `sudo`; safe to
   skip, or add to a monthly cron — see the script).

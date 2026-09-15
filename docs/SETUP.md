@@ -130,7 +130,16 @@ relying on it somewhere without a laptop to fall back on:
 - Confirm the Pi has a saved profile for the hotspot you'll use
   (`/etc/wpa_supplicant/wpa_supplicant.conf` on the Pi vs. the phone's
   current hotspot SSID).
-- The hotspot doesn't need internet access — only NTP time sync does.
+- **The hotspot itself doesn't need mobile data/internet** — a phone
+  creates its own local WiFi AP regardless of whether it has a working
+  data connection; the Pi joins it and gets a local IP the same either
+  way. `pifite` works the same with no internet reachable at all:
+  `nmap` is run with `-n` (no DNS lookups, which would otherwise hang
+  out to their own timeout with no resolver reachable) and every OUI
+  vendor source it uses is a local file, not a live lookup. The one
+  exception is `update-oui-master.sh` (see below), which is a separate,
+  manually-run script — fails cleanly with no internet and leaves
+  `pifite` unaffected either way.
 - Do a live end-to-end test (power-cycle the Pi, confirm `pi` connects)
   before you're out of reach of the hardware.
 

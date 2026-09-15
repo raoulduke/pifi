@@ -887,3 +887,16 @@ separate capture or extra decode cost, per #26's lesson above.
 **A real parsing pitfall caught before shipping it:** the file is CSV with a quoted `address` field containing embedded commas (`"7760 France Ave S Suite 340 Bloomington MN US 55438"`). The existing two sources' lookups use `awk` with a plain field split, which is fine for their simpler formats but would silently misparse this file's columns. Used Python's `csv` module for this third source specifically instead of forcing it through the same `awk` pattern.
 
 **Fix:** `scripts/pentest/update-oui-master.sh` downloads/refreshes the file to `/usr/local/share/pifi/oui-master.csv` (run manually, or add to a monthly cron matching the upstream repo's own update cadence); `mac_vendors_bulk()` checks it as a third-tier fallback, only if the file exists -- skipping the download entirely leaves the tool exactly as it was, no regression risk.
+
+---
+
+### 30. `pifite` needs to work with no internet reachable at all -- confirmed and guarded, not assumed
+
+**Requested:** confirm phone-hotspot-with-no-data still works for running `pifite`, and add guards so nothing that touches the network crashes/hangs when there's genuinely no internet path out (a phone hotspot with no mobile data is a normal, expected case while mobile).
+
+**Confirmed rather than assumed:**
+- A phone's hotspot is a plain local WiFi AP -- it works identically whether or not the phone itself has a working data connection. The Pi joining it and getting a local IP doesn't depend on internet reachability at all.
+- `sudo` itself isn't at risk of the classic "hangs resolving its own hostname with no DNS reachable" gotcha -- checked `/etc/hosts` directly: `pitail` already resolves to `127.0.1.1` locally, confirmed `sudo` completes in ~0.17s either way.
+- Every OUI vendor source `mac_vendors_bulk()` uses (`ieee-data`, `nmap-mac-prefixes`, and the optional third-tier database from `update-oui-master.sh`) is a local file -- no live lookup at scan time, ever.
+
+**The one real gap found, confirmed rather than assumed:** neither `nmap` invocation (same-network device discovery, and the active per-device probe) passed `-n`, so both would fall back to `nmap`'s **default reverse-DNS lookup per host** -- with no resolver reachable (a data-less hotspot forwards nowhere), each one hangs out to its own internal DNS timeout instead of failing fast, slowing down or even eating into the active probe's fixed 20-25s budget for nothing. `pifite` never uses `nmap`'s own resolved-hostname output anyway (name resolution is its own separate mDNS/DHCP/NetBIOS pass) -- fixed by adding `-n` to both. Added the same flag to every `tshark` invocation too, defensively -- confirmed directly against a real capture that it doesn't change any extracted field's value (Hue Bridge name and TXT-record model both still extracted identically), only skips resolution attempts this code never used the results of anyway.

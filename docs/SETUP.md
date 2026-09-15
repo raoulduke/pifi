@@ -184,19 +184,27 @@ relying on it somewhere without a laptop to fall back on:
 
 A banner main menu, arrow keys or number keys to select:
 
-1. **Network discovery** — scans (2.4GHz + 5GHz), shows results live
-   as they're found with a real countdown. `s` saves the list to disk
-   for attacks to use instead of re-scanning (re-run discovery and save
-   again to refresh it); Esc discards without saving. The saved list is
-   removed automatically when `pifite` exits.
-2. **Deauth attack** — picks a network from the saved list, scans it
-   for connected devices (live, by MAC/signal, with IP and MAC shown
-   once resolved). When on the same network as `wlan0`, this also runs
-   ARP/`nmap`/NetBIOS/mDNS discovery concurrently, each shown as its
-   own step with live status. Picking a device shows full details
-   (vendor, resolved name, OS guess, signal, probed SSIDs) with a
-   `Send Deauth` action; a WPA3 network gets a warning that deauth is
-   unlikely to work (Protected Management Frames).
+1. **Network discovery** — scans continuously (2.4GHz + 5GHz), showing
+   results live as they're found, until `q` stops it (elapsed time is
+   shown, not a countdown — a generous safety ceiling auto-stops it if
+   left running unattended). `s` saves the list to disk for attacks to
+   use instead of re-scanning (re-run discovery and save again to
+   refresh it); Esc discards without saving. The saved list is removed
+   automatically when `pifite` exits.
+2. **Deauth attack** — picks a network from the saved list, then scans
+   it for connected devices (live, by MAC/signal). This also runs
+   continuously until `q`: when on the same network as `wlan0`, ARP/
+   `nmap`/NetBIOS/mDNS discovery keeps re-running the whole time
+   (each shown as its own step with live status), filling in more
+   IP/name/vendor/model detail on already-found devices rather than
+   resolving once at the end. Resolved info is cached per network for
+   the rest of the session — backing out to the network list and back
+   in warm-starts from what's already known instead of losing it; `r`
+   on the device list clears that cache and forces a fresh scan.
+   Picking a device shows full details (vendor, resolved name, OS
+   guess, signal, probed SSIDs) with a `Send Deauth` action; a WPA3
+   network gets a warning that deauth is unlikely to work (Protected
+   Management Frames).
 
 Device identification is passive by default (MAC vendor, probed SSIDs
 always available; a DHCP/mDNS/NetBIOS name only resolves on an *open*
